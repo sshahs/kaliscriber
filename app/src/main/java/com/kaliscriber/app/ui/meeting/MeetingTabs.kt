@@ -674,6 +674,13 @@ fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
                                 }
                                 if (mine || message.isError) {
                                     Text(message.content, style = MaterialTheme.typography.bodyMedium)
+                                    if (message.isError && message.id == meeting.chat.lastOrNull()?.id) {
+                                        TextButton(onClick = { vm.retryFailedAnswer(message.id) }, enabled = !thinking) {
+                                            Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Try again")
+                                        }
+                                    }
                                 } else {
                                     SelectionContainer { MarkdownText(message.content) }
                                     val isSpeaking = speaking == message.id

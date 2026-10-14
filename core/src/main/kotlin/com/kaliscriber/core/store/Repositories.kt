@@ -135,6 +135,9 @@ class MeetingRepository(
 
     suspend fun clearChat(meetingId: String) = update(meetingId) { it.copy(chat = emptyList()) }
 
+    suspend fun removeChatMessages(meetingId: String, ids: Set<String>) =
+        update(meetingId) { m -> m.copy(chat = m.chat.filterNot { it.id in ids }) }
+
     private fun Meeting.withoutUnusedPlaceholders(): Meeting {
         val used = segments.mapNotNull { it.speakerId }.toSet()
         return copy(speakers = speakers.filter { !it.isPlaceholder || it.id in used })

@@ -62,7 +62,7 @@ class MeetingPipeline(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            log("$label: failed after ${(clock.now() - started) / 1000}s: ${e.message}")
+            log("$label: failed after ${(clock.now() - started) / 1000}s: ${describe(e)}")
             throw e
         }
     }
@@ -85,7 +85,7 @@ class MeetingPipeline(
         repo.update(meetingId) { m ->
             m.copy(
                 pendingChunks = (m.pendingChunks.filter { it.index != chunk.index } + chunk).sortedBy { it.index },
-                lastError = e.message ?: "Transcription failed",
+                lastError = describe(e),
                 durationMs = maxOf(m.durationMs, chunk.endMs),
             )
         }
@@ -167,7 +167,7 @@ class MeetingPipeline(
             throw e
         } catch (e: Exception) {
             repo.update(meetingId) {
-                it.copy(status = MeetingStatus.ERROR, lastError = e.message ?: "Transcription failed", processingStep = null, processingProgress = null)
+                it.copy(status = MeetingStatus.ERROR, lastError = describe(e), processingStep = null, processingProgress = null)
             }
             return
         }
@@ -195,7 +195,7 @@ class MeetingPipeline(
             throw e
         } catch (e: Exception) {
             // Keep the live transcript; just note why the better pass did not happen.
-            repo.update(meetingId) { it.copy(lastError = "Full-meeting speaker detection failed: ${e.message}") }
+            repo.update(meetingId) { it.copy(lastError = "Full-meeting speaker detection failed: ${describe(e)}") }
             false
         }
     }
@@ -226,7 +226,7 @@ class MeetingPipeline(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            repo.update(meetingId) { it.copy(lastError = "On-device speaker detection failed: ${e.message}") }
+            repo.update(meetingId) { it.copy(lastError = "On-device speaker detection failed: ${describe(e)}") }
             false
         }
     }
@@ -311,9 +311,16 @@ class MeetingPipeline(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            errors += "$name: ${e.message ?: e.javaClass.simpleName}"
+            errors += "$name: ${describe(e)}"
+            // Unexpected (non-network, non-provider) failures get a stack trace in the log.
+            if (e !is AiException) log("$name failed: ${e.stackTraceToString().take(4_000)}")
         }
     }
+
+    /** A readable reason for [e]; never blank. */
+    private fun describe(e: Throwable): String =
+        e.message?.takeIf { it.isNotBlank() } ?: e.cause?.message?.takeIf { it.isNotBlank() }
+            ?: e.javaClass.simpleName.ifBlank { "Unknown error" }
 
     /**
      * Computes a voiceprint for every speaker and names those whose voice matches someone the user
@@ -391,7 +398,7 @@ class MeetingPipeline(
             throw e
         } catch (e: Exception) {
             // The rename itself succeeded; remembering the voice is best effort.
-            repo.update(meetingId) { it.copy(lastError = "Could not save ${name.trim()}'s voice: ${e.message}") }
+            repo.update(meetingId) { it.copy(lastError = "Could not save ${name.trim()}'s voice: ${describe(e)}") }
         }
     }
 
@@ -409,12 +416,35 @@ class MeetingPipeline(
         val meeting = repo.get(meetingId) ?: return
         if (meeting.segments.isEmpty()) throw AiException("There is no transcript yet.")
         val audio = meeting.audioPath?.let(::File)?.takeIf { it.exists() }
+        val onDevice = runCatching { ai.stt() }.getOrNull() as? SpeakerDiarizer
         repo.update(meetingId) { it.copy(status = MeetingStatus.ANALYZING, lastError = null) }
         try {
             val done = audio != null && tryFullDiarization(meetingId, audio, meeting.durationMs)
-            if (!done) separateSpeakers(meetingId)
-            if (settings().rememberVoices) recognizeVoices(meetingId)
-            if (settings().suggestSpeakerNames) runCatching { suggestSpeakerNames(meetingId) }
+            if (!done) {
+                try {
+                    stage(meetingId, "Separating speakers with AI") { separateSpeakers(meetingId) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val hint = if (onDevice != null && (!onDevice.diarizationAvailable || !settings().localDiarization)) {
+                        " Tip: download the speaker detection pack (Settings → On-device speech) to detect speakers on the phone, without the internet."
+                    } else {
+                        ""
+                    }
+                    throw AiException("Couldn't re-detect speakers: ${describe(e)}$hint", cause = e)
+                }
+            }
+            val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
+            if (settings().rememberVoices) {
+                step(errors, "Voice recognition") { stage(meetingId, "Recognising saved voices") { recognizeVoices(meetingId) } }
+            }
+            if (settings().suggestSpeakerNames) step(errors, "Speaker names") { suggestSpeakerNames(meetingId) }
+            if (errors.isNotEmpty()) repo.update(meetingId) { it.copy(lastError = errors.joinToString("\n")) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            repo.update(meetingId) { it.copy(lastError = describe(e)) }
+            throw e
         } finally {
             repo.update(meetingId) { it.copy(status = MeetingStatus.READY, processingStep = null, processingProgress = null) }
         }
@@ -489,7 +519,7 @@ class MeetingPipeline(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            val message = e.message ?: "Something went wrong"
+            val message = describe(e)
             repo.update(meetingId) {
                 it.copy(chat = it.chat + ChatMessage(Ids.new(), ChatRole.ASSISTANT, message, clock.now(), isError = true))
             }

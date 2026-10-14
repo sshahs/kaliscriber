@@ -10,6 +10,7 @@ import com.kaliscriber.app.export.exportMessage
 import com.kaliscriber.app.speech.VoiceRecorder
 import com.kaliscriber.core.export.ExportResult
 import com.kaliscriber.core.model.MeetingStatus
+import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.transcript.TranscriptFormatter
@@ -100,6 +101,17 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     }
 
     fun clearChat() = viewModelScope.launch { repo.clearChat(meetingId) }
+
+    /** Asks the question behind a failed answer again, replacing the failed exchange. */
+    fun retryFailedAnswer(errorMessageId: String) {
+        val chat = meeting.value?.chat ?: return
+        val index = chat.indexOfFirst { it.id == errorMessageId }
+        val question = chat.take(index.coerceAtLeast(0)).lastOrNull { it.role == ChatRole.USER } ?: return
+        viewModelScope.launch {
+            repo.removeChatMessages(meetingId, setOf(errorMessageId, question.id))
+            launchTask(Busy.ASK) { pipeline.ask(meetingId, question.content, question.excerpt) }
+        }
+    }
 
     // --- Reading aloud --------------------------------------------------------------------------
 

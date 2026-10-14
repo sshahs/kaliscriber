@@ -1,5 +1,6 @@
 package com.kaliscriber.core.ai
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -16,6 +17,11 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -54,14 +60,65 @@ internal suspend fun Call.await(): Response = suspendCancellableCoroutine { cont
 
 internal fun JsonElement.toBody(): RequestBody = toString().toRequestBody(JSON_MEDIA)
 
+/** How network failures are retried. The delays are replaceable so tests run fast. */
+object NetworkRetry {
+    /** Waits before the 2nd and 3rd attempt. */
+    var delaysMs: List<Long> = listOf(2_000, 6_000)
+    /** Longest Retry-After honoured from a 429/503 reply. */
+    var maxRetryAfterMs: Long = 30_000
+}
+
+/**
+ * Sends [request], retrying failures that happen before the provider could have done any work
+ * (DNS lookups, refused connections, connect timeouts) and short-lived overload replies
+ * (429/502/503/504). A read timeout is not retried: the model may still be busy on that request.
+ */
+internal suspend fun OkHttpClient.send(request: Request, provider: ProviderId): Response {
+    var attempt = 0
+    while (true) {
+        var waitMs: Long
+        try {
+            val response = newCall(request).await()
+            if (response.code !in RETRY_STATUS || attempt >= NetworkRetry.delaysMs.size) return response
+            waitMs = response.header("Retry-After")?.toLongOrNull()?.times(1000) ?: NetworkRetry.delaysMs[attempt]
+            response.close()
+        } catch (e: IOException) {
+            if (!isRetryable(e) || attempt >= NetworkRetry.delaysMs.size) throw networkError(provider, request, e)
+            waitMs = NetworkRetry.delaysMs[attempt]
+        }
+        delay(waitMs.coerceAtMost(NetworkRetry.maxRetryAfterMs))
+        attempt++
+    }
+}
+
+private val RETRY_STATUS = setOf(429, 502, 503, 504)
+
+private fun isRetryable(e: IOException): Boolean = when (e) {
+    is UnknownHostException, is ConnectException, is NoRouteToHostException -> true
+    is SocketTimeoutException -> e.message.orEmpty().contains("connect", ignoreCase = true)
+    else -> false
+}
+
+/** Turns low-level network exceptions into messages people can act on. */
+internal fun networkError(provider: ProviderId, request: Request, e: IOException): AiException {
+    val host = request.url.host
+    val message = when {
+        e is UnknownHostException ->
+            "Couldn't find $host (no internet, or DNS couldn't resolve it). Check your connection, VPN or Private DNS setting, then try again."
+        e is ConnectException || e is NoRouteToHostException ->
+            "Couldn't connect to ${provider.displayName} ($host). Check your connection and try again."
+        e is SocketTimeoutException && e.message.orEmpty().contains("connect", ignoreCase = true) ->
+            "Connecting to ${provider.displayName} timed out. Check your connection and try again."
+        e is InterruptedIOException ->
+            "${provider.displayName} took too long to answer. Try again, or pick a faster model or a lower thinking effort in Settings."
+        else -> "Could not reach ${provider.displayName}: ${e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName}"
+    }
+    return AiException(message, cause = e)
+}
+
 /** Executes the request and returns the body text, mapping failures to readable [AiException]s. */
 internal suspend fun OkHttpClient.executeForText(request: Request, provider: ProviderId): String {
-    val response = try {
-        newCall(request).await()
-    } catch (e: IOException) {
-        throw AiException("Could not reach ${provider.displayName}: ${e.message ?: e.javaClass.simpleName}", cause = e)
-    }
-    response.use {
+    send(request, provider).use {
         val text = it.body?.string().orEmpty()
         if (!it.isSuccessful) throw httpError(provider, it.code, text)
         return text
@@ -119,12 +176,7 @@ internal fun Request.Builder.headers(extra: Map<String, String>): Request.Builde
 
 /** Executes the request and returns the raw body bytes (e.g. synthesized audio). */
 internal suspend fun OkHttpClient.executeForBytes(request: Request, provider: ProviderId): ByteArray {
-    val response = try {
-        newCall(request).await()
-    } catch (e: IOException) {
-        throw AiException("Could not reach ${provider.displayName}: ${e.message ?: e.javaClass.simpleName}", cause = e)
-    }
-    response.use {
+    send(request, provider).use {
         if (!it.isSuccessful) throw httpError(provider, it.code, it.body?.string().orEmpty())
         return it.body?.bytes() ?: ByteArray(0)
     }
