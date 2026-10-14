@@ -308,10 +308,12 @@ class LocalSpeechEngine(
                     val index = blockIndex
                     val blockStarted = SystemClock.elapsedRealtime()
                     onProgress((index.toFloat() / blocks).coerceAtMost(1f))
-                    val segments = diarizer.processWithCallback(samples, callback = { processed, total, _ ->
-                        if (total > 0) onProgress(((index + processed.toFloat() / total) / blocks).coerceAtMost(1f))
-                        0 // keep going
-                    })
+                    val segments = diarizer.processWithCallback(
+                        samples,
+                        callback = DiarizationCallback { processed, total ->
+                            if (total > 0) onProgress(((index + processed.toFloat() / total) / blocks).coerceAtMost(1f))
+                        },
+                    )
                     val offsetMs = offset * 1000 / rate
                     segments.forEach {
                         blockTurns += Triple(index, it.speaker, SpeakerTurn(offsetMs + (it.start * 1000).toLong(), offsetMs + (it.end * 1000).toLong(), ""))
@@ -443,6 +445,19 @@ class LocalSpeechEngine(
                 }
             }
         }
+
+    /**
+     * Progress callback for sherpa-onnx diarization. The native code looks up
+     * `invoke(IIJ)Ljava/lang/Integer;` by name, which a Kotlin lambda lacks (it is compiled to a
+     * class with only the generic `invoke(Object, Object, Object)`), and the app aborts. A named
+     * class gets that exact method. Returning 0 lets diarization continue.
+     */
+    private class DiarizationCallback(private val report: (processed: Int, total: Int) -> Unit) : (Int, Int, Long) -> Int {
+        override fun invoke(processed: Int, total: Int, arg: Long): Int {
+            runCatching { report(processed, total) }
+            return 0
+        }
+    }
 
     private class FloatArrayBuilder {
         private var data = FloatArray(AudioDecoder.SAMPLE_RATE * 10)
