@@ -1,9 +1,16 @@
 package com.kaliscriber.core.ai
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -23,6 +30,7 @@ import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -73,12 +81,12 @@ object NetworkRetry {
  * (DNS lookups, refused connections, connect timeouts) and short-lived overload replies
  * (429/502/503/504). A read timeout is not retried: the model may still be busy on that request.
  */
-internal suspend fun OkHttpClient.send(request: Request, provider: ProviderId): Response {
+internal suspend fun OkHttpClient.send(request: Request, provider: ProviderId, onCall: (Call) -> Unit = {}): Response {
     var attempt = 0
     while (true) {
         var waitMs: Long
         try {
-            val response = newCall(request).await()
+            val response = newCall(request).also(onCall).await()
             if (response.code !in RETRY_STATUS || attempt >= NetworkRetry.delaysMs.size) return response
             waitMs = response.header("Retry-After")?.toLongOrNull()?.times(1000) ?: NetworkRetry.delaysMs[attempt]
             response.close()
@@ -123,6 +131,74 @@ internal suspend fun OkHttpClient.executeForText(request: Request, provider: Pro
         if (!it.isSuccessful) throw httpError(provider, it.code, text)
         return text
     }
+}
+
+/**
+ * Executes a streaming request and calls [onLine] for each line of the reply as it arrives (on a
+ * background thread). Cancelling the caller cancels the call, which ends a read in progress.
+ */
+internal suspend fun OkHttpClient.streamLines(request: Request, provider: ProviderId, onLine: (String) -> Unit) {
+    var call: Call? = null
+    send(request, provider) { call = it }.use { response ->
+        if (!response.isSuccessful) throw httpError(provider, response.code, response.body?.string().orEmpty())
+        val source = response.body?.source() ?: return
+        coroutineScope {
+            // A blocked read only ends when the call is cancelled, which closes its connection.
+            val finished = AtomicBoolean(false)
+            val canceller = launch {
+                try {
+                    awaitCancellation()
+                } finally {
+                    if (!finished.get()) call?.cancel()
+                }
+            }
+            try {
+                withContext(Dispatchers.IO) {
+                    while (true) {
+                        val line = try {
+                            source.readUtf8Line()
+                        } catch (e: IOException) {
+                            ensureActive()
+                            throw networkError(provider, request, e)
+                        } ?: break
+                        onLine(line)
+                    }
+                }
+                finished.set(true)
+            } finally {
+                canceller.cancel()
+            }
+        }
+    }
+}
+
+/**
+ * Collects a server-sent event stream: [onEvent] gets each `data:` payload except the closing
+ * `[DONE]`. Lines that are not part of an event stream are returned, so a provider that ignored
+ * the request to stream and sent one ordinary JSON reply can still be read.
+ */
+internal suspend fun OkHttpClient.streamEvents(request: Request, provider: ProviderId, onEvent: (String) -> Unit): String {
+    val other = StringBuilder()
+    var sse = false
+    streamLines(request, provider) { line ->
+        when {
+            line.startsWith("data:") -> {
+                sse = true
+                val data = line.removePrefix("data:").trim()
+                if (data.isNotEmpty() && data != "[DONE]") onEvent(data)
+            }
+            line.startsWith("event:") || line.startsWith(":") || line.startsWith("id:") || line.startsWith("retry:") -> sse = true
+            !sse -> other.append(line).append('\n')
+        }
+    }
+    return other.toString()
+}
+
+/** The message of an `{"error": ...}` object sent in the middle of a stream, if [obj] is one. */
+internal fun streamError(obj: JsonObject): String? {
+    val error = obj["error"]
+    if (error == null || error is JsonNull) return null
+    return extractErrorMessage(obj.toString()).ifBlank { "unknown error" }
 }
 
 internal suspend fun OkHttpClient.executeForJson(request: Request, provider: ProviderId): JsonObject {

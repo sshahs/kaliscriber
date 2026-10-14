@@ -38,13 +38,16 @@ class LibraryAsk(
         history.update { emptyList() }
     }
 
-    /** Asks [question]; the answer (or an error message) is added to the conversation and returned. */
-    suspend fun ask(question: String): AskMessage {
+    /**
+     * Asks [question]; the answer (or an error message) is added to the conversation and returned.
+     * [onText] gets the answer written so far while it arrives.
+     */
+    suspend fun ask(question: String, onText: ((String) -> Unit)? = null): AskMessage {
         val q = question.trim()
         val previous = history.value.value
         history.update { it + AskMessage(Ids.new(), ChatRole.USER, q, clock.now()) }
         val reply = try {
-            answer(q, previous)
+            answer(q, previous, onText)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -54,7 +57,7 @@ class LibraryAsk(
         return reply
     }
 
-    private suspend fun answer(question: String, previous: List<AskMessage>): AskMessage {
+    private suspend fun answer(question: String, previous: List<AskMessage>, onText: ((String) -> Unit)?): AskMessage {
         val all = meetings.all().filter { it.segments.isNotEmpty() || it.insights != null }
         if (all.isEmpty()) throw AiException("There are no transcribed meetings to search yet.")
         // Follow-ups ("and who owns it?") lean on the previous question for what to look up.
@@ -67,9 +70,8 @@ class LibraryAsk(
         val turns = previous.filter { !it.isError }.takeLast(10).map {
             LlmMessage(if (it.role == ChatRole.USER) LlmRole.USER else LlmRole.ASSISTANT, it.content)
         } + LlmMessage(LlmRole.USER, question)
-        val text = ai.chat().complete(
-            LlmRequest(system = Prompts.libraryAskSystem(context, clock.now(), settings().outputLanguage, settings().glossary), messages = turns),
-        ).trim()
+        val request = LlmRequest(system = Prompts.libraryAskSystem(context, clock.now(), settings().outputLanguage, settings().glossary), messages = turns)
+        val text = (if (onText == null) ai.chat().complete(request) else ai.chat().stream(request, onText)).trim()
         val cited = citedSources(text, sources)
         val shown = cited.ifEmpty { sources.take(3).map { AskSource(it.meeting.id, it.meeting.title, label = it.label) } }
         return AskMessage(Ids.new(), ChatRole.ASSISTANT, text, clock.now(), sources = shown)

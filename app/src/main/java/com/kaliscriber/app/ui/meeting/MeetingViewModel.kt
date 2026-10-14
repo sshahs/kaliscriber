@@ -54,6 +54,10 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     /** The excerpt the next question in "Ask AI" is about. */
     val excerpt = MutableStateFlow<ExcerptRef?>(null)
 
+    /** The answer the AI has written so far, while it is still writing it. */
+    private val _answering = MutableStateFlow<String?>(null)
+    val answering: StateFlow<String?> = _answering.asStateFlow()
+
     val player = AudioPlayer(viewModelScope)
 
     private val speech = container.speech
@@ -110,7 +114,15 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         if (question.isBlank()) return
         val about = excerpt.value
         excerpt.value = null
-        launchTask(Busy.ASK) { pipeline.ask(meetingId, question, about) }
+        launchTask(Busy.ASK) { askStreaming(question, about) }
+    }
+
+    private suspend fun askStreaming(question: String, about: ExcerptRef?) {
+        try {
+            pipeline.ask(meetingId, question, about) { _answering.value = it }
+        } finally {
+            _answering.value = null
+        }
     }
 
     fun clearChat() = viewModelScope.launch { repo.clearChat(meetingId) }
@@ -122,7 +134,7 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         val question = chat.take(index.coerceAtLeast(0)).lastOrNull { it.role == ChatRole.USER } ?: return
         viewModelScope.launch {
             repo.removeChatMessages(meetingId, setOf(errorMessageId, question.id))
-            launchTask(Busy.ASK) { pipeline.ask(meetingId, question.content, question.excerpt) }
+            launchTask(Busy.ASK) { askStreaming(question.content, question.excerpt) }
         }
     }
 

@@ -1,9 +1,12 @@
 package com.kaliscriber.core.ai.llm
 
 import com.kaliscriber.core.ai.AiException
+import com.kaliscriber.core.ai.AiJson
 import com.kaliscriber.core.ai.ProviderConfig
 import com.kaliscriber.core.ai.bearer
 import com.kaliscriber.core.ai.executeForJson
+import com.kaliscriber.core.ai.streamError
+import com.kaliscriber.core.ai.streamLines
 import com.kaliscriber.core.ai.toBody
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -27,10 +30,34 @@ class OllamaLlm(
 ) : LlmClient {
 
     override suspend fun complete(request: LlmRequest): String {
+        val json = http.executeForJson(httpRequest(request, stream = false), config.id)
+        val text = json["message"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
+        return text
+    }
+
+    /** Ollama streams one JSON object per line. */
+    override suspend fun stream(request: LlmRequest, onText: (String) -> Unit): String {
+        val text = StringBuilder()
+        http.streamLines(httpRequest(request, stream = true), config.id) { line ->
+            if (line.isBlank()) return@streamLines
+            val obj = runCatching { AiJson.parseToJsonElement(line).jsonObject }.getOrNull() ?: return@streamLines
+            streamError(obj)?.let { throw AiException("${config.id.displayName} error: $it") }
+            val piece = obj["message"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (piece.isNotEmpty()) {
+                text.append(piece)
+                onText(text.toString())
+            }
+        }
+        if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
+        return text.toString()
+    }
+
+    private fun httpRequest(request: LlmRequest, stream: Boolean): Request {
         if (config.chatModel.isBlank()) throw AiException("No chat model set for ${config.id.displayName}")
         val body = buildJsonObject {
             put("model", config.chatModel)
-            put("stream", false)
+            put("stream", stream)
             if (request.jsonMode) put("format", "json")
             request.outputLimit?.let { limit -> putJsonObject("options") { put("num_predict", limit) } }
             putJsonArray("messages") {
@@ -43,11 +70,7 @@ class OllamaLlm(
                 }
             }
         }
-        val req = Request.Builder().url("${config.baseUrl}/api/chat").bearer(config.apiKey).post(body.toBody()).build()
-        val json = http.executeForJson(req, config.id)
-        val text = json["message"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
-        return text
+        return Request.Builder().url("${config.baseUrl}/api/chat").bearer(config.apiKey).post(body.toBody()).build()
     }
 
     override suspend fun listModels(): List<String> {

@@ -752,12 +752,19 @@ class MeetingPipeline(
      * Asks the AI about the meeting (optionally about a selected excerpt) and records the exchange.
      * [spoken] asks for a short answer without Markdown, for voice conversations.
      */
-    suspend fun ask(meetingId: String, question: String, excerpt: ExcerptRef? = null, spoken: Boolean = false): Result<String> {
+    /** Asks about a meeting; [onText] gets the answer written so far while it arrives. */
+    suspend fun ask(
+        meetingId: String,
+        question: String,
+        excerpt: ExcerptRef? = null,
+        spoken: Boolean = false,
+        onText: ((String) -> Unit)? = null,
+    ): Result<String> {
         val before = repo.get(meetingId) ?: return Result.failure(IllegalArgumentException("Meeting not found"))
         val userMessage = ChatMessage(Ids.new(), ChatRole.USER, question.trim(), clock.now(), excerpt)
         repo.update(meetingId) { it.copy(chat = it.chat + userMessage) }
         return try {
-            val answer = meetingAi.answer(before, before.chat, question.trim(), excerpt, spoken)
+            val answer = meetingAi.answer(before, before.chat, question.trim(), excerpt, spoken, onText)
             repo.update(meetingId) { it.copy(chat = it.chat + ChatMessage(Ids.new(), ChatRole.ASSISTANT, answer, clock.now())) }
             Result.success(answer)
         } catch (e: CancellationException) {

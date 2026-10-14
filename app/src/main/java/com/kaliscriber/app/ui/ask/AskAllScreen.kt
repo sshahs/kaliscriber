@@ -56,6 +56,7 @@ import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.ui.common.MarkdownText
+import com.kaliscriber.app.ui.common.StreamingAnswer
 import com.kaliscriber.core.model.AskMessage
 import com.kaliscriber.core.model.AskSource
 import com.kaliscriber.core.model.ChatRole
@@ -71,14 +72,19 @@ class AskAllViewModel(private val container: AppContainer) : ViewModel() {
     private val _thinking = MutableStateFlow(false)
     val thinking: StateFlow<Boolean> = _thinking.asStateFlow()
 
+    /** The answer the AI has written so far, while it is still writing it. */
+    private val _answering = MutableStateFlow<String?>(null)
+    val answering: StateFlow<String?> = _answering.asStateFlow()
+
     fun ask(question: String) {
         if (question.isBlank() || _thinking.value) return
         _thinking.value = true
         // The app scope keeps the request going if the user leaves the screen.
         container.scope.launch {
             try {
-                container.libraryAsk.ask(question)
+                container.libraryAsk.ask(question) { _answering.value = it }
             } finally {
+                _answering.value = null
                 _thinking.value = false
             }
         }
@@ -97,6 +103,9 @@ fun AskAllScreen(
     val vm = appViewModel { AskAllViewModel(it) }
     val messages by vm.messages.collectAsStateWithLifecycle()
     val thinking by vm.thinking.collectAsStateWithLifecycle()
+    val answering by vm.answering.collectAsStateWithLifecycle()
+    // Hidden as soon as the finished answer is in the conversation.
+    val partial = answering?.takeIf { messages.lastOrNull()?.role == ChatRole.USER }
     var input by rememberSaveable { mutableStateOf("") }
     var askedInitial by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -107,7 +116,7 @@ fun AskAllScreen(
             vm.ask(initialQuestion)
         }
     }
-    LaunchedEffect(messages.size, thinking) {
+    LaunchedEffect(messages.size, thinking, partial != null) {
         val count = messages.size + if (thinking) 1 else 0
         if (count > 0) listState.animateScrollToItem(count - 1)
     }
@@ -162,10 +171,14 @@ fun AskAllScreen(
                     items(messages, key = { it.id }) { message -> MessageBubble(message, onOpenSource) }
                     if (thinking) {
                         item {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Searching your meetings…", style = MaterialTheme.typography.bodySmall)
+                            if (partial != null) {
+                                StreamingAnswer(partial, maxWidth = 360.dp)
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Searching your meetings…", style = MaterialTheme.typography.bodySmall)
+                                }
                             }
                         }
                     }

@@ -200,6 +200,7 @@ class MeetingAi(
         question: String,
         excerpt: ExcerptRef?,
         spoken: Boolean = false,
+        onText: ((String) -> Unit)? = null,
     ): String {
         requireTranscript(meeting)
         val messages = history.filterNot { it.isError }.takeLast(20).map {
@@ -208,7 +209,8 @@ class MeetingAi(
         val prefix = shared(meeting)
         var system = prefix + "\n" + Prompts.ANSWER_TASK
         if (spoken) system += "\n" + Prompts.SPOKEN_ANSWER_RULE
-        return ai.chat().complete(LlmRequest(system = system, messages = messages, cachePrefix = prefix)).trim()
+        val request = LlmRequest(system = system, messages = messages, cachePrefix = prefix)
+        return (if (onText == null) ai.chat().complete(request) else ai.chat().stream(request, onText)).trim()
     }
 
     /** A natural, speakable recap of the meeting for an audio briefing. */

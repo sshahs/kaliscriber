@@ -29,6 +29,13 @@ data class LlmRequest(
 interface LlmClient {
     val config: ProviderConfig
     suspend fun complete(request: LlmRequest): String
+
+    /**
+     * Like [complete], but calls [onText] with the answer written so far as it arrives, so it can be
+     * shown while the model is still writing. Returns the whole answer.
+     */
+    suspend fun stream(request: LlmRequest, onText: (String) -> Unit): String = complete(request).also(onText)
+
     suspend fun listModels(): List<String>
 }
 

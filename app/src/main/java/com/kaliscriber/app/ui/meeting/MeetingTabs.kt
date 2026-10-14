@@ -105,6 +105,7 @@ import com.kaliscriber.app.ui.common.EmptyState
 import com.kaliscriber.app.ui.common.MarkdownText
 import com.kaliscriber.app.ui.common.SectionCard
 import com.kaliscriber.app.ui.common.SpeakerBadge
+import com.kaliscriber.app.ui.common.StreamingAnswer
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
@@ -621,7 +622,9 @@ fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
     val thinking = Busy.ASK in busy
-    LaunchedEffect(meeting.chat.size, thinking) {
+    // Hidden as soon as the finished answer is in the conversation.
+    val partial = vm.answering.collectAsStateWithLifecycle().value?.takeIf { meeting.chat.lastOrNull()?.role == ChatRole.USER }
+    LaunchedEffect(meeting.chat.size, thinking, partial != null) {
         val count = meeting.chat.size + if (thinking) 1 else 0
         if (count > 0) listState.animateScrollToItem(count - 1)
     }
@@ -715,10 +718,14 @@ fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
                 }
                 if (thinking) {
                     item {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Thinking…", style = MaterialTheme.typography.bodySmall)
+                        if (partial != null) {
+                            StreamingAnswer(partial, maxWidth = 340.dp)
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Thinking…", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }

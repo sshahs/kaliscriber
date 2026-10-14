@@ -1,14 +1,18 @@
 package com.kaliscriber.core.ai.llm
 
 import com.kaliscriber.core.ai.AiException
+import com.kaliscriber.core.ai.AiJson
 import com.kaliscriber.core.ai.ProviderConfig
 import com.kaliscriber.core.ai.executeForJson
 import com.kaliscriber.core.ai.headers
+import com.kaliscriber.core.ai.streamError
+import com.kaliscriber.core.ai.streamEvents
 import com.kaliscriber.core.ai.toBody
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -23,8 +27,38 @@ class AnthropicLlm(
 ) : LlmClient {
 
     override suspend fun complete(request: LlmRequest): String {
+        val json = http.executeForJson(baseRequest("/v1/messages").post(body(request, stream = false).toBody()).build(), config.id)
+        val text = json["content"]?.jsonArray.orEmpty()
+            .filterIsInstance<JsonObject>()
+            .filter { it["type"]?.jsonPrimitive?.contentOrNull == "text" }
+            .joinToString("") { it["text"]?.jsonPrimitive?.contentOrNull.orEmpty() }
+        if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
+        return text
+    }
+
+    override suspend fun stream(request: LlmRequest, onText: (String) -> Unit): String {
+        val text = StringBuilder()
+        val req = baseRequest("/v1/messages").post(body(request, stream = true).toBody()).build()
+        http.streamEvents(req, config.id) { data ->
+            val obj = runCatching { AiJson.parseToJsonElement(data).jsonObject }.getOrNull() ?: return@streamEvents
+            streamError(obj)?.let { throw AiException("${config.id.displayName} error: $it") }
+            if (obj["type"]?.jsonPrimitive?.contentOrNull != "content_block_delta") return@streamEvents
+            val delta = obj["delta"]?.jsonObject ?: return@streamEvents
+            if (delta["type"]?.jsonPrimitive?.contentOrNull != "text_delta") return@streamEvents
+            val piece = delta["text"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            if (piece.isNotEmpty()) {
+                text.append(piece)
+                onText(text.toString())
+            }
+        }
+        if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
+        return text.toString()
+    }
+
+    private fun body(request: LlmRequest, stream: Boolean): JsonObject {
         if (config.chatModel.isBlank()) throw AiException("No chat model set for ${config.id.displayName}")
-        val body = buildJsonObject {
+        return buildJsonObject {
+            if (stream) put("stream", true)
             put("model", config.chatModel)
             put("max_tokens", request.outputLimit ?: request.maxTokens)
             val prefix = request.cachePrefix?.takeIf { request.system.startsWith(it) && it.length >= MIN_CACHE_CHARS }
@@ -51,13 +85,6 @@ class AnthropicLlm(
                 }
             }
         }
-        val json = http.executeForJson(baseRequest("/v1/messages").post(body.toBody()).build(), config.id)
-        val text = json["content"]?.jsonArray.orEmpty()
-            .filterIsInstance<JsonObject>()
-            .filter { it["type"]?.jsonPrimitive?.contentOrNull == "text" }
-            .joinToString("") { it["text"]?.jsonPrimitive?.contentOrNull.orEmpty() }
-        if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
-        return text
     }
 
     override suspend fun listModels(): List<String> {

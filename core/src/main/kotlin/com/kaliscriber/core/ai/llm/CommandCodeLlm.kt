@@ -31,6 +31,9 @@ class CommandCodeLlm(
 
     override suspend fun complete(request: LlmRequest): String = wireFor(config.chatModel).complete(request)
 
+    override suspend fun stream(request: LlmRequest, onText: (String) -> Unit): String =
+        wireFor(config.chatModel).stream(request, onText)
+
     override suspend fun listModels(): List<String> = chatWire.listModels()
 
     companion object {
