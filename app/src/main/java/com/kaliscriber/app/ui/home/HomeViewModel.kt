@@ -10,17 +10,21 @@ import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.app.speech.ModelCatalog
 import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.core.ai.ProviderId
+import com.kaliscriber.core.calendar.MeetingPrep
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
 import com.kaliscriber.core.search.MeetingSearch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,6 +54,16 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val recording: StateFlow<RecordingState> = container.recorder.state
+
+    /** What to know before the meeting in progress or the next one today, from the calendar. */
+    val prep: StateFlow<MeetingPrep.Prep?> = flow {
+        while (true) {
+            emit(container.calendar.nextEvent())
+            delay(5 * 60_000L)
+        }
+    }.combine(container.meetings.meetings) { event, meetings ->
+        event?.let { MeetingPrep.prep(it, meetings, container.voices.profiles.value) }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** True when the selected chat or transcription provider still needs an API key. */
     val needsSetup: StateFlow<Boolean> = combine(

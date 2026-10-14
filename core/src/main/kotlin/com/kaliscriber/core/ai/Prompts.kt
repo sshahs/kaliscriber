@@ -170,6 +170,9 @@ object Prompts {
             appendLine("Duration: ${TranscriptFormatter.timestamp(meeting.durationMs)}")
         }
         meeting.expectedSpeakers?.let { appendLine("Number of participants: $it") }
+        meeting.calendarEvent?.takeIf { it.attendees.isNotEmpty() }?.let {
+            appendLine("Invited (from the calendar; the speakers are likely among them): ${it.attendees.joinToString()}")
+        }
         val known = meeting.speakers.filter { !it.isPlaceholder }.map { it.name }
         val unknown = meeting.speakers.filter { it.isPlaceholder }.map { it.name }
         if (known.isNotEmpty()) appendLine("Identified speakers: ${known.joinToString()}")

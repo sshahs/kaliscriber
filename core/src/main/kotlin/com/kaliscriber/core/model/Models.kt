@@ -2,6 +2,7 @@ package com.kaliscriber.core.model
 
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
+import com.kaliscriber.core.calendar.CalendarEvent
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNames
 
@@ -40,6 +41,8 @@ data class Meeting(
     val expectedSpeakers: Int? = null,
     /** What processing did and how long each step took, oldest first. */
     val timeline: List<TimelineEntry> = emptyList(),
+    /** The calendar event this meeting was recorded for. */
+    val calendarEvent: CalendarEvent? = null,
     val updatedAt: Long = createdAt,
 ) {
     fun speaker(id: String?): Speaker? = speakers.firstOrNull { it.id == id }

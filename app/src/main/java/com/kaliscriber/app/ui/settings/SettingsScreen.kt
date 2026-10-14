@@ -443,6 +443,11 @@ private fun ExportSection(settings: AppSettings, vm: SettingsViewModel) {
             SecretField("Password", ExportSecret.CALDAV_PASSWORD in secrets) { vm.saveExportSecret(ExportSecret.CALDAV_PASSWORD, it) }
             ToggleRow("Add the meeting as an event", "", e.caldavEvent) { v -> vm.updateExport { it.copy(caldavEvent = v) } }
             ToggleRow("Add action items as tasks", "", e.caldavTasks) { v -> vm.updateExport { it.copy(caldavTasks = v) } }
+            ToggleRow(
+                "Use this calendar for meetings",
+                "Recordings take the title and invitees of the event happening now, and Home shows what to prepare for the next one.",
+                e.calendarLookup,
+            ) { v -> vm.updateExport { it.copy(calendarLookup = v) } }
             TestRow(status[ExportTarget.CALDAV]) { vm.testExport(ExportTarget.CALDAV) }
         }
         ExportCard(

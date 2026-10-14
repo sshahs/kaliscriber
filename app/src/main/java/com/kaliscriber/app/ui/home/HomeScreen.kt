@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Key
@@ -40,9 +41,11 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -72,6 +75,7 @@ import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.app.ui.common.EmptyState
 import com.kaliscriber.app.ui.people.PeopleTab
 import com.kaliscriber.app.ui.tasks.TasksTab
+import com.kaliscriber.core.calendar.MeetingPrep
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
@@ -101,6 +105,7 @@ fun HomeScreen(
     val query by vm.query.collectAsStateWithLifecycle()
     val recording by vm.recording.collectAsStateWithLifecycle()
     val needsSetup by vm.needsSetup.collectAsStateWithLifecycle()
+    val prep by vm.prep.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(startTab.coerceIn(0, 3)) }
     var confirmDelete by remember { mutableStateOf<(() -> Unit)?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -234,6 +239,18 @@ fun HomeScreen(
                             SearchResultRow(result, onOpen = { segmentId -> onOpenMeetingAt(result.meeting.id, segmentId) })
                         }
                     } else if (tab == 0) {
+                        val upcoming = prep
+                        if (upcoming != null && active !is RecordingState.Recording) {
+                            item {
+                                PrepCard(
+                                    upcoming,
+                                    onPrepare = { onAskAll(MeetingPrep.question(upcoming.event)) },
+                                    onRecord = ::requestRecording,
+                                    onOpenMeeting = onOpenMeeting,
+                                    onOpenPerson = onOpenPerson,
+                                )
+                            }
+                        }
                         if (meetings.isEmpty()) {
                             item {
                                 EmptyState(
@@ -280,6 +297,71 @@ fun HomeScreen(
             },
             dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
         )
+    }
+}
+
+/** The meeting in progress or coming up next on the calendar, with what is open with its invitees. */
+@Composable
+private fun PrepCard(
+    prep: MeetingPrep.Prep,
+    onPrepare: () -> Unit,
+    onRecord: () -> Unit,
+    onOpenMeeting: (String) -> Unit,
+    onOpenPerson: (String) -> Unit,
+) {
+    val event = prep.event
+    val now = System.currentTimeMillis()
+    val time = DateFormat.getTimeInstance(DateFormat.SHORT)
+    val whenText = when {
+        event.start <= now -> "Now, until ${time.format(Date(event.end))}"
+        event.start - now < 60 * 60_000L -> "In ${((event.start - now) / 60_000).coerceAtLeast(1)} min · ${time.format(Date(event.start))}"
+        else -> "${time.format(Date(event.start))}–${time.format(Date(event.end))}"
+    }
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Event, null)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(event.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(listOfNotNull(whenText, event.location).joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (event.attendees.isNotEmpty()) {
+                Text("With ${event.attendees.joinToString()}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            prep.people.filter { it.openItems.isNotEmpty() }.take(3).forEach { person ->
+                Text(
+                    "${person.name}: " + person.openItems.take(2).joinToString("; ") { it.item.task } +
+                        if (person.openItems.size > 2) " (+${person.openItems.size - 2} more)" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable { onOpenPerson(person.name) },
+                )
+            }
+            prep.lastMeeting?.let { last ->
+                Text(
+                    "Last time: ${last.title} (${DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(last.createdAt))})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable { onOpenMeeting(last.id) },
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = onPrepare) { Text("Prepare") }
+                OutlinedButton(onClick = onRecord) {
+                    Icon(Icons.Filled.FiberManualRecord, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Record")
+                }
+            }
+        }
     }
 }
 

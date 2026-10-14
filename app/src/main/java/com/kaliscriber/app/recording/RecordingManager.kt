@@ -50,7 +50,8 @@ class RecordingManager(
     private val pipeline: MeetingPipeline,
     private val settings: () -> AppSettings,
     private val scope: CoroutineScope,
-    private val onStart: () -> Unit = {},
+    /** Called with the new meeting's id when recording starts. */
+    private val onStart: (String) -> Unit = {},
 ) {
     private val _state = MutableStateFlow<RecordingState>(RecordingState.Idle)
     val state: StateFlow<RecordingState> = _state.asStateFlow()
@@ -74,7 +75,7 @@ class RecordingManager(
         check(_state.value == RecordingState.Idle) { "A meeting is already being recorded" }
         val meeting = meetings.create(title)
         pendingMeetingId = meeting.id
-        onStart()
+        onStart(meeting.id)
         ContextCompat.startForegroundService(
             context,
             Intent(context, RecordingService::class.java).setAction(RecordingService.ACTION_START),

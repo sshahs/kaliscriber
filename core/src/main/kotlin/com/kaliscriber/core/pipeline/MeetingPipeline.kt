@@ -8,6 +8,8 @@ import com.kaliscriber.core.ai.Prompts
 import com.kaliscriber.core.ai.stt.DiarizedBlock
 import com.kaliscriber.core.ai.stt.SpeakerDiarizer
 import com.kaliscriber.core.ai.stt.SpeakerTurn
+import com.kaliscriber.core.calendar.CalendarEvent
+import com.kaliscriber.core.calendar.MeetingPrep
 import com.kaliscriber.core.ai.stt.SttResult
 import com.kaliscriber.core.ai.stt.VoiceEmbedder
 import com.kaliscriber.core.model.AudioChunk
@@ -726,6 +728,23 @@ class MeetingPipeline(
             log("Voice memory: ${profile.name} ${if (prints.isEmpty()) "has no recordings left to learn from" else "learned again from ${prints.size} meeting(s)"}")
         }
         return learned
+    }
+
+    /**
+     * Links a meeting to the calendar event it was recorded for: the event's title becomes the
+     * meeting's, the invitees help name speakers, and their number is the expected head count
+     * unless one was already chosen.
+     */
+    suspend fun attachCalendarEvent(meetingId: String, event: CalendarEvent) {
+        repo.update(meetingId) { m ->
+            m.copy(
+                calendarEvent = event,
+                title = if (m.autoTitle) event.title else m.title,
+                autoTitle = false,
+                expectedSpeakers = m.expectedSpeakers ?: MeetingPrep.expectedSpeakers(event),
+            )
+        }
+        log("Calendar: recording \"${event.title}\" with ${event.attendees.size} invitee(s)")
     }
 
     /** Sets how many people are in the meeting (null = detect automatically). */

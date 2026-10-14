@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.net.ConnectivityManager
 import android.util.Log
+import com.kaliscriber.app.calendar.CalendarService
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.app.export.MeetingExporter
 import com.kaliscriber.app.processing.MeetingJobs
@@ -116,9 +117,13 @@ class AppContainer(context: Context) {
         ai,
         settings,
     )
-    val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope, onStart = {
+    /** Events from the CalDAV calendar, for meeting titles, invitees and prep. */
+    val calendar = CalendarService(http, settings, secrets)
+    val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope, onStart = { meetingId ->
         // Start fetching speaker detection now so it is ready when the meeting ends.
         if (speakerPackMissing) models.downloadDiarization()
+        // A meeting on the calendar right now gives the recording its title and invitees.
+        if (calendar.enabled) scope.launch { calendar.eventNow()?.let { pipeline.attachCalendarEvent(meetingId, it) } }
     })
 
     /** True when on-device speaker detection is wanted but its models are not on the phone yet. */
