@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
@@ -34,7 +35,11 @@ class ProcessingService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(null, null), foregroundType())
+        if (!enterForeground()) {
+            // The job still runs while the app is open; it just isn't protected in the background.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (wakeLock?.isHeld != true) {
             wakeLock = getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KaliScriber:processing")
@@ -65,6 +70,28 @@ class ProcessingService : LifecycleService() {
                 .distinctUntilChanged()
                 .collect { (step, percent) -> notify(buildNotification(step, percent)) }
         }
+    }
+
+    /**
+     * Calls the platform directly: ServiceCompat drops service types newer than the AndroidX version
+     * knows (mediaProcessing), which Android then rejects as "type none".
+     */
+    private fun enterForeground(): Boolean {
+        val notification = buildNotification(null, null)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification)
+            return true
+        }
+        // Prefer the media-processing type; fall back to data sync if this Android rejects it.
+        for (type in listOf(foregroundType(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC).distinct()) {
+            try {
+                startForeground(NOTIFICATION_ID, notification, type)
+                return true
+            } catch (e: Exception) {
+                Log.w("KaliScriber", "Could not run meeting processing in the foreground (type $type): ${e.message}")
+            }
+        }
+        return false
     }
 
     private fun foregroundType(): Int = when {
