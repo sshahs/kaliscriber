@@ -163,6 +163,8 @@ data class AppSettings(
     val llmSpeakerSeparation: Boolean = true,
     /** Ask the LLM to suggest real names for placeholder speakers. */
     val suggestSpeakerNames: Boolean = true,
+    /** Remember voices across meetings (voiceprints stay on the device). */
+    val rememberVoices: Boolean = true,
     /** Generate summary, insights, gaps and questions automatically after a meeting. */
     val autoAnalyze: Boolean = true,
     /** Rough cap on transcript characters sent to the LLM in one request. */

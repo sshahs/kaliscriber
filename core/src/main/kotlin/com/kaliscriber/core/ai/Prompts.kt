@@ -2,6 +2,7 @@ package com.kaliscriber.core.ai
 
 import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
+import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -74,7 +75,12 @@ object Prompts {
     fun meetingContext(meeting: Meeting, transcript: String) = buildString {
         appendLine("Meeting: ${meeting.title}")
         appendLine("Date: ${formatDate(meeting.createdAt)}")
-        if (meeting.durationMs > 0) appendLine("Duration: ${TranscriptFormatter.timestamp(meeting.durationMs)}")
+        if (meeting.status == MeetingStatus.RECORDING) {
+            appendLine("Status: the meeting is still in progress. The transcript so far runs to ${TranscriptFormatter.timestamp(meeting.durationMs)}; \"recently\" means the last few minutes of it.")
+        } else if (meeting.durationMs > 0) {
+            appendLine("Duration: ${TranscriptFormatter.timestamp(meeting.durationMs)}")
+        }
+        meeting.expectedSpeakers?.let { appendLine("Number of participants: $it") }
         val known = meeting.speakers.filter { !it.isPlaceholder }.map { it.name }
         val unknown = meeting.speakers.filter { it.isPlaceholder }.map { it.name }
         if (known.isNotEmpty()) appendLine("Identified speakers: ${known.joinToString()}")

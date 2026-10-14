@@ -27,6 +27,8 @@ data class Meeting(
     val speakersFinal: Boolean = false,
     val lastError: String? = null,
     val briefing: Briefing? = null,
+    /** How many people are in the meeting, if the user said; null lets the app detect it. */
+    val expectedSpeakers: Int? = null,
     val updatedAt: Long = createdAt,
 ) {
     fun speaker(id: String?): Speaker? = speakers.firstOrNull { it.id == id }
@@ -47,6 +49,10 @@ data class Speaker(
     val colorIndex: Int = 0,
     val suggestedName: String? = null,
     val suggestionReason: String? = null,
+    /** Voiceprint (speaker embedding) computed on-device from this speaker's audio. */
+    val embedding: List<Float>? = null,
+    /** Saved voice this speaker was recognised as, or enrolled into. */
+    val voiceProfileId: String? = null,
 )
 
 @Serializable

@@ -5,6 +5,7 @@ import com.kaliscriber.core.ai.AiServices
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.MeetingAi
 import com.kaliscriber.core.ai.stt.SpeakerDiarizer
+import com.kaliscriber.core.ai.stt.VoiceEmbedder
 import com.kaliscriber.core.ai.stt.SttResult
 import com.kaliscriber.core.model.AudioChunk
 import com.kaliscriber.core.model.Briefing
@@ -14,6 +15,7 @@ import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.speakers.SpeakerAssigner
+import com.kaliscriber.core.speakers.VoiceLibrary
 import com.kaliscriber.core.store.MeetingRepository
 import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
@@ -40,11 +42,13 @@ class MeetingPipeline(
     private val settings: () -> AppSettings,
     private val clock: Clock = Clock.System,
     private val random: Random = Random.Default,
+    private val voices: VoiceLibrary? = null,
+    private val embedder: () -> VoiceEmbedder? = { null },
 ) {
 
     /** Transcribes one live chunk and appends it. Returns false (and queues the chunk) on failure. */
     suspend fun transcribeChunk(meetingId: String, chunk: AudioChunk): Boolean = try {
-        val result = transcribeFile(File(chunk.path), chunk.endMs - chunk.startMs)
+        val result = transcribeFile(File(chunk.path), chunk.endMs - chunk.startMs, repo.get(meetingId)?.expectedSpeakers)
         appendChunk(meetingId, chunk, result)
         deleteQuietly(chunk.path)
         true
@@ -73,9 +77,9 @@ class MeetingPipeline(
         }
     }
 
-    private suspend fun transcribeFile(file: File, durationMs: Long?): SttResult {
+    private suspend fun transcribeFile(file: File, durationMs: Long?, speakers: Int? = null): SttResult {
         val language = settings().transcriptionLanguage.takeIf { it.isNotBlank() }
-        return ai.stt().transcribe(file, language, durationMs)
+        return ai.stt().transcribe(file, language, durationMs, speakers)
     }
 
     suspend fun retryPendingChunks(meetingId: String) {
@@ -122,7 +126,7 @@ class MeetingPipeline(
                         "limit of ${stt.config.id.displayName}. Choose Deepgram or AssemblyAI for long recordings.",
                 )
             }
-            val result = transcribeFile(audioFile, durationMs)
+            val result = transcribeFile(audioFile, durationMs, repo.get(meetingId)?.expectedSpeakers)
             replaceTranscript(meetingId, result, durationMs)
             if (!result.diarized) applyLocalDiarization(meetingId, audioFile)
         } catch (e: CancellationException) {
@@ -145,7 +149,7 @@ class MeetingPipeline(
         val size = audioFile.length()
         if (!stt.supportsDiarization || size <= 0 || size > stt.maxUploadBytes) return false
         return try {
-            val result = transcribeFile(audioFile, durationMs)
+            val result = transcribeFile(audioFile, durationMs, repo.get(meetingId)?.expectedSpeakers)
             if (result.segments.isEmpty()) return false
             replaceTranscript(meetingId, result, durationMs)
             true
@@ -163,7 +167,7 @@ class MeetingPipeline(
         val diarizer = runCatching { ai.stt() }.getOrNull() as? SpeakerDiarizer ?: return false
         if (!settings().localDiarization || !diarizer.diarizationAvailable) return false
         return try {
-            val turns = diarizer.diarize(audioFile)
+            val turns = diarizer.diarize(audioFile, repo.get(meetingId)?.expectedSpeakers)
             if (turns.isEmpty()) return false
             repo.update(meetingId) { m ->
                 val result = SpeakerAssigner.applyTurns(m.segments, turns, random)
@@ -212,6 +216,7 @@ class MeetingPipeline(
         if (s.llmSpeakerSeparation && needsSpeakerSeparation(meeting)) {
             step(errors, "Speaker separation") { separateSpeakers(meetingId) }
         }
+        if (s.rememberVoices) step(errors, "Voice recognition") { recognizeVoices(meetingId) }
         if (s.suggestSpeakerNames) step(errors, "Speaker names") { suggestSpeakerNames(meetingId) }
         if (s.autoAnalyze) {
             step(errors, "Summary") { generateInsights(meetingId) }
@@ -237,6 +242,111 @@ class MeetingPipeline(
             throw e
         } catch (e: Exception) {
             errors += "$name: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /**
+     * Computes a voiceprint for every speaker and names those whose voice matches someone the user
+     * named in an earlier meeting. Unmatched speakers keep their placeholder names.
+     */
+    suspend fun recognizeVoices(meetingId: String) {
+        val library = voices ?: return
+        val voiceprints = computeVoiceprints(meetingId) ?: return
+        val matches = library.assign(voiceprints)
+        repo.update(meetingId) { m ->
+            m.copy(speakers = m.speakers.map { sp ->
+                val print = voiceprints[sp.id]
+                val match = matches[sp.id]
+                when {
+                    print == null -> sp
+                    match != null && sp.isPlaceholder && m.speakers.none { it.id != sp.id && it.name.equals(match.profile.name, true) } ->
+                        sp.copy(
+                            name = match.profile.name,
+                            isPlaceholder = false,
+                            voiceProfileId = match.profile.id,
+                            embedding = print.toList(),
+                            suggestedName = null,
+                            suggestionReason = null,
+                        )
+                    else -> sp.copy(embedding = print.toList())
+                }
+            })
+        }
+    }
+
+    /** Voiceprints for the meeting's speakers from their longest stretches of speech, or null if unavailable. */
+    private suspend fun computeVoiceprints(meetingId: String, onlySpeaker: String? = null): Map<String, FloatArray>? {
+        val engine = embedder() ?: return null
+        if (!engine.voiceEmbeddingAvailable) return null
+        val meeting = repo.get(meetingId) ?: return null
+        val audio = meeting.audioPath?.let(::File)?.takeIf { it.exists() } ?: return null
+        val spans = meeting.segments
+            .filter { it.speakerId != null && (onlySpeaker == null || it.speakerId == onlySpeaker) }
+            .filter { it.endMs - it.startMs >= MIN_VOICEPRINT_SEGMENT_MS }
+            .groupBy { it.speakerId!! }
+            .mapValues { (_, segs) ->
+                var total = 0L
+                segs.sortedByDescending { it.endMs - it.startMs }
+                    .takeWhile { seg -> (total < MAX_VOICEPRINT_MS).also { total += seg.endMs - seg.startMs } }
+                    .sortedBy { it.startMs }
+                    .map { it.startMs..it.endMs }
+            }
+            .filterValues { it.isNotEmpty() }
+        if (spans.isEmpty()) return emptyMap()
+        return engine.embed(audio, spans)
+    }
+
+    /**
+     * Renames a speaker everywhere in the meeting. With voice memory on, the speaker's voice is saved
+     * under that name so they are recognised automatically in future meetings.
+     */
+    suspend fun renameSpeaker(meetingId: String, speakerId: String, name: String) {
+        repo.renameSpeaker(meetingId, speakerId, name)
+        val library = voices ?: return
+        if (!settings().rememberVoices || name.isBlank()) return
+        try {
+            val meeting = repo.get(meetingId) ?: return
+            // A rename to an existing name merges speakers, so look the speaker up by name.
+            val speaker = meeting.speakers.firstOrNull { it.name.equals(name.trim(), true) } ?: return
+            val print = speaker.embedding?.toFloatArray()
+                ?: computeVoiceprints(meetingId, onlySpeaker = speaker.id)?.get(speaker.id)
+                ?: return
+            val profile = library.enroll(speaker.name, print)
+            repo.update(meetingId) { m ->
+                m.copy(speakers = m.speakers.map {
+                    if (it.id == speaker.id) it.copy(voiceProfileId = profile.id, embedding = print.toList()) else it
+                })
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The rename itself succeeded; remembering the voice is best effort.
+            repo.update(meetingId) { it.copy(lastError = "Could not save ${name.trim()}'s voice: ${e.message}") }
+        }
+    }
+
+    /** Sets how many people are in the meeting (null = detect automatically). */
+    suspend fun setExpectedSpeakers(meetingId: String, count: Int?) {
+        repo.update(meetingId) { it.copy(expectedSpeakers = count?.takeIf { n -> n > 0 }) }
+    }
+
+    /**
+     * Detects speakers again, e.g. after the expected number of speakers changed: on-device
+     * diarization when available, else a diarizing transcription service, else the AI model.
+     * Then recognises saved voices and suggests names.
+     */
+    suspend fun redetectSpeakers(meetingId: String) {
+        val meeting = repo.get(meetingId) ?: return
+        if (meeting.segments.isEmpty()) throw AiException("There is no transcript yet.")
+        val audio = meeting.audioPath?.let(::File)?.takeIf { it.exists() }
+        repo.update(meetingId) { it.copy(status = MeetingStatus.ANALYZING, lastError = null) }
+        try {
+            val done = audio != null && tryFullDiarization(meetingId, audio, meeting.durationMs)
+            if (!done) separateSpeakers(meetingId)
+            if (settings().rememberVoices) recognizeVoices(meetingId)
+            if (settings().suggestSpeakerNames) runCatching { suggestSpeakerNames(meetingId) }
+        } finally {
+            repo.update(meetingId) { it.copy(status = MeetingStatus.READY) }
         }
     }
 
@@ -282,7 +392,6 @@ class MeetingPipeline(
         generateGaps(meetingId)
     }
 
-    /** Asks the AI about the meeting (optionally about a selected excerpt) and records the exchange. */
     /** Writes a spoken recap script for the meeting and stores it (audio is rendered by the app). */
     suspend fun generateBriefingScript(meetingId: String): String {
         val meeting = repo.get(meetingId) ?: throw AiException("Meeting not found")
@@ -316,6 +425,11 @@ class MeetingPipeline(
             }
             Result.failure(e)
         }
+    }
+
+    private companion object {
+        const val MIN_VOICEPRINT_SEGMENT_MS = 1_000L
+        const val MAX_VOICEPRINT_MS = 45_000L
     }
 
     private suspend fun deleteQuietly(path: String) = withContext(Dispatchers.IO) { runCatching { File(path).delete() } }

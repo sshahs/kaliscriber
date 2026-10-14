@@ -25,7 +25,7 @@ class ElevenLabsStt(
 
     override val supportsDiarization: Boolean = true
 
-    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?): SttResult {
+    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?, speakers: Int?): SttResult {
         if (config.apiKey.isBlank()) throw AiException("Add your ElevenLabs API key in Settings.")
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("file", audio.name, audio.asRequestBody(audioMediaType(audio)))
@@ -33,7 +33,10 @@ class ElevenLabsStt(
             .addFormDataPart("diarize", "true")
             .addFormDataPart("timestamps_granularity", "word")
             .addFormDataPart("tag_audio_events", "false")
-            .apply { if (!language.isNullOrBlank()) addFormDataPart("language_code", language) }
+            .apply {
+                if (!language.isNullOrBlank()) addFormDataPart("language_code", language)
+                if (speakers != null) addFormDataPart("num_speakers", speakers.toString())
+            }
             .build()
         val request = Request.Builder()
             .url("${config.baseUrl}/v1/speech-to-text")

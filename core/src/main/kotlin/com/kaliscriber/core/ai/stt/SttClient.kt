@@ -32,7 +32,8 @@ interface SttClient {
 
     val maxUploadBytes: Long get() = config.id.maxUploadBytes
 
-    suspend fun transcribe(audio: File, language: String? = null, durationHintMs: Long? = null): SttResult
+    /** [speakers] is the expected number of speakers, when the user knows it. */
+    suspend fun transcribe(audio: File, language: String? = null, durationHintMs: Long? = null, speakers: Int? = null): SttResult
 }
 
 object SttClients {
@@ -62,7 +63,16 @@ data class SpeakerTurn(val startMs: Long, val endMs: Long, val speaker: String)
  */
 interface SpeakerDiarizer {
     val diarizationAvailable: Boolean
-    suspend fun diarize(audio: File): List<SpeakerTurn>
+    suspend fun diarize(audio: File, speakers: Int? = null): List<SpeakerTurn>
+}
+
+/**
+ * Computes voiceprints (speaker embeddings) so the app can recognise the same person across meetings.
+ * [spans] maps a speaker id to the time ranges (ms) where that speaker talks.
+ */
+interface VoiceEmbedder {
+    val voiceEmbeddingAvailable: Boolean
+    suspend fun embed(audio: File, spans: Map<String, List<LongRange>>): Map<String, FloatArray>
 }
 
 internal fun audioMediaType(file: File): MediaType = when (file.extension.lowercase()) {

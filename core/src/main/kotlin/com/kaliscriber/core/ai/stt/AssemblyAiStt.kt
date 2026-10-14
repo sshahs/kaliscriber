@@ -28,7 +28,7 @@ class AssemblyAiStt(
 
     override val supportsDiarization: Boolean = true
 
-    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?): SttResult {
+    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?, speakers: Int?): SttResult {
         val upload = http.executeForJson(
             request("/v2/upload").post(audio.asRequestBody(audioMediaType(audio))).build(),
             config.id,
@@ -40,6 +40,7 @@ class AssemblyAiStt(
             request("/v2/transcript").post(buildJsonObject {
                 put("audio_url", uploadUrl)
                 put("speaker_labels", true)
+                if (speakers != null) put("speakers_expected", speakers)
                 if (config.sttModel.isNotBlank()) put("speech_model", config.sttModel)
                 if (language.isNullOrBlank()) put("language_detection", true) else put("language_code", language)
             }.toBody()).build(),

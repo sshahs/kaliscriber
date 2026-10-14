@@ -23,7 +23,7 @@ class DeepgramStt(
 
     override val supportsDiarization: Boolean = true
 
-    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?): SttResult {
+    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?, speakers: Int?): SttResult {
         val url = "${config.baseUrl}/v1/listen".toHttpUrl().newBuilder()
             .addQueryParameter("model", config.sttModel.ifBlank { "nova-3" })
             .addQueryParameter("diarize", "true")

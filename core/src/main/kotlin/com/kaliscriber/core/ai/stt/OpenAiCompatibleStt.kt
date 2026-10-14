@@ -42,7 +42,7 @@ class OpenAiCompatibleStt(
             }
         }
 
-    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?): SttResult {
+    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?, speakers: Int?): SttResult {
         if (config.sttModel.isBlank()) throw AiException("No transcription model set for ${config.id.displayName}")
         val format = responseFormat
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)

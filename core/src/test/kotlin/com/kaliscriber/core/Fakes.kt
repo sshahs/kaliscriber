@@ -9,6 +9,7 @@ import com.kaliscriber.core.ai.stt.SpeakerDiarizer
 import com.kaliscriber.core.ai.stt.SpeakerTurn
 import com.kaliscriber.core.ai.stt.SttClient
 import com.kaliscriber.core.ai.stt.SttResult
+import com.kaliscriber.core.ai.stt.VoiceEmbedder
 import java.io.File
 
 class FakeLlm(private val respond: (LlmRequest) -> String) : LlmClient {
@@ -27,7 +28,7 @@ class FakeStt(
 ) : SttClient {
     val files = mutableListOf<File>()
     override val config = AppSettings().configFor(ProviderId.OPENAI, "k")
-    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?): SttResult {
+    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?, speakers: Int?): SttResult {
         files += audio
         return respond(audio)
     }
@@ -48,12 +49,25 @@ class FakeLocalStt(
     override val config = AppSettings().configFor(ProviderId.LOCAL, null)
     override val supportsDiarization = false
     override val diarizationAvailable = true
-    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?): SttResult {
+    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?, speakers: Int?): SttResult {
         files += audio
         return respond(audio)
     }
-    override suspend fun diarize(audio: File): List<SpeakerTurn> {
+    var lastSpeakerCount: Int? = null
+    override suspend fun diarize(audio: File, speakers: Int?): List<SpeakerTurn> {
         diarizeCalls++
+        lastSpeakerCount = speakers
         return turns
+    }
+}
+
+/** Fake voiceprints: each speaker's "voice" is decided by the text they spoke. */
+class FakeEmbedder(private val voiceOf: (String) -> FloatArray) : VoiceEmbedder {
+    var calls = 0
+    lateinit var segmentsText: (String) -> String
+    override val voiceEmbeddingAvailable = true
+    override suspend fun embed(audio: File, spans: Map<String, List<LongRange>>): Map<String, FloatArray> {
+        calls++
+        return spans.mapValues { (speakerId, _) -> voiceOf(segmentsText(speakerId)) }
     }
 }

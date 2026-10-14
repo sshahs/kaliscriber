@@ -199,6 +199,7 @@ class MeetingAi(
                     }
                     appendLine()
                 }
+                meeting.expectedSpeakers?.let { appendLine("The meeting has $it speakers in total.") }
                 appendLine("Segments:")
                 window.forEachIndexed { i, seg -> appendLine("$i| ${seg.text.replace('\n', ' ')}") }
             }
