@@ -160,6 +160,9 @@ class RecordingManager(
         } ?: return
         try {
             // Let live transcription of the queued chunks finish before the final pass.
+            // Recording has stopped, so stop showing the meeting as recording.
+            meetings.update(stopped.meetingId) { it.copy(status = MeetingStatus.TRANSCRIBING) }
+            if (queued.get() > 0) pipeline.noteStep(stopped.meetingId, "Transcribing the last ${queued.get()} part(s) of the meeting")
             chunks?.close()
             consumer?.join()
             chunks = null

@@ -312,9 +312,29 @@ private fun StatusBanner(meeting: Meeting, busy: Set<Busy>, onRetry: () -> Unit)
         else -> null
     }
     if (working != null) {
+        val step = meeting.processingStep.takeIf { meeting.status != MeetingStatus.RECORDING }
+        val fraction = meeting.processingProgress
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(working, style = MaterialTheme.typography.bodySmall)
-            LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+            Text(
+                when {
+                    step != null && fraction != null -> "$step · ${(fraction * 100).toInt()}%"
+                    step != null -> "$step…"
+                    else -> working
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (fraction != null && step != null) {
+                LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            } else {
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+            }
+            if (meeting.status != MeetingStatus.RECORDING) {
+                Text(
+                    "You can leave the app; processing continues in the background.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
     val error = meeting.lastError

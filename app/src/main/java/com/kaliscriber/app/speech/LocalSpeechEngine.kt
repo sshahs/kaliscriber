@@ -26,6 +26,8 @@ import com.kaliscriber.core.ai.stt.SpeakerTurn
 import com.kaliscriber.core.ai.stt.SttClient
 import com.kaliscriber.core.ai.stt.SttResult
 import com.kaliscriber.core.ai.stt.VoiceEmbedder
+import android.os.SystemClock
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -86,11 +88,14 @@ class LocalSpeechEngine(
                     }
                 }
 
+                val started = SystemClock.elapsedRealtime()
                 if (models.isReady(ModelCatalog.vad)) {
                     transcribeWithVad(audio, ::recognize)
                 } else {
                     transcribeInWindows(audio, ::recognize)
                 }
+                val audioMs = segments.lastOrNull()?.endMs ?: 0
+                Log.i(TAG, "${model.id}: transcribed ${audio.name} (${audioMs / 1000}s of speech) in ${SystemClock.elapsedRealtime() - started} ms")
                 SttResult(segments, diarized = false)
             }
         }
@@ -218,7 +223,7 @@ class LocalSpeechEngine(
         return created
     }
 
-    override suspend fun diarize(audio: File, speakers: Int?): List<SpeakerTurn> = withContext(Dispatchers.Default) {
+    override suspend fun diarize(audio: File, speakers: Int?, onProgress: (Float) -> Unit): List<SpeakerTurn> = withContext(Dispatchers.Default) {
         lock.withLock {
             if (!models.diarizationReady) return@withLock emptyList()
             // The whole meeting must be in memory at once; stay well inside the heap.
@@ -246,7 +251,14 @@ class LocalSpeechEngine(
             )
             val diarizer = OfflineSpeakerDiarization(null, config)
             try {
-                diarizer.process(samples).map {
+                val started = SystemClock.elapsedRealtime()
+                Log.i(TAG, "Diarizing ${samples.size / AudioDecoder.SAMPLE_RATE}s of audio (speakers=${speakers ?: "auto"})")
+                diarizer.processWithCallback(samples, callback = { processed, total, _ ->
+                    if (total > 0) onProgress(processed.toFloat() / total)
+                    0 // keep going
+                }).also {
+                    Log.i(TAG, "Diarization found ${it.map { s -> s.speaker }.distinct().size} speakers in ${SystemClock.elapsedRealtime() - started} ms")
+                }.map {
                     SpeakerTurn((it.start * 1000).toLong(), (it.end * 1000).toLong(), it.speaker.toString())
                 }
             } finally {
@@ -338,6 +350,7 @@ class LocalSpeechEngine(
     }
 
     private companion object {
+        const val TAG = "KaliScriber"
         const val VAD_WINDOW = 512
     }
 }

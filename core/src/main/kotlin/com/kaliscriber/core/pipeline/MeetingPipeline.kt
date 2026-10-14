@@ -21,6 +21,10 @@ import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.random.Random
@@ -44,11 +48,34 @@ class MeetingPipeline(
     private val random: Random = Random.Default,
     private val voices: VoiceLibrary? = null,
     private val embedder: () -> VoiceEmbedder? = { null },
+    /** Receives a line per processing step with its duration, for the platform log. */
+    private val log: (String) -> Unit = {},
 ) {
+
+    /** Shows what processing is doing on the meeting, and logs how long each step takes. */
+    private suspend fun <T> stage(meetingId: String, label: String, block: suspend () -> T): T {
+        repo.update(meetingId) { it.copy(processingStep = label, processingProgress = null) }
+        val started = clock.now()
+        log("$label: started")
+        try {
+            return block().also { log("$label: done in ${(clock.now() - started) / 1000}s") }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log("$label: failed after ${(clock.now() - started) / 1000}s: ${e.message}")
+            throw e
+        }
+    }
+
+    private suspend fun progress(meetingId: String, fraction: Float) {
+        repo.update(meetingId) { it.copy(processingProgress = fraction.coerceIn(0f, 1f)) }
+    }
 
     /** Transcribes one live chunk and appends it. Returns false (and queues the chunk) on failure. */
     suspend fun transcribeChunk(meetingId: String, chunk: AudioChunk): Boolean = try {
+        val started = clock.now()
         val result = transcribeFile(File(chunk.path), chunk.endMs - chunk.startMs, repo.get(meetingId)?.expectedSpeakers)
+        log("Chunk ${chunk.index} (${(chunk.endMs - chunk.startMs) / 1000}s audio): ${result.segments.size} segments in ${clock.now() - started} ms")
         appendChunk(meetingId, chunk, result)
         deleteQuietly(chunk.path)
         true
@@ -82,8 +109,15 @@ class MeetingPipeline(
         return ai.stt().transcribe(file, language, durationMs, speakers)
     }
 
+    /** Shows a processing step on the meeting from outside the pipeline (e.g. the recorder). */
+    suspend fun noteStep(meetingId: String, label: String, fraction: Float? = null) {
+        log(label)
+        repo.update(meetingId) { it.copy(processingStep = label, processingProgress = fraction) }
+    }
+
     suspend fun retryPendingChunks(meetingId: String) {
         val pending = repo.get(meetingId)?.pendingChunks.orEmpty()
+        if (pending.isNotEmpty()) noteStep(meetingId, "Transcribing ${pending.size} remaining part(s)")
         for (chunk in pending) {
             if (!File(chunk.path).exists()) {
                 repo.update(meetingId) { m -> m.copy(pendingChunks = m.pendingChunks.filter { it.index != chunk.index }) }
@@ -132,7 +166,9 @@ class MeetingPipeline(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            repo.update(meetingId) { it.copy(status = MeetingStatus.ERROR, lastError = e.message ?: "Transcription failed") }
+            repo.update(meetingId) {
+                it.copy(status = MeetingStatus.ERROR, lastError = e.message ?: "Transcription failed", processingStep = null, processingProgress = null)
+            }
             return
         }
         analyze(meetingId)
@@ -149,7 +185,9 @@ class MeetingPipeline(
         val size = audioFile.length()
         if (!stt.supportsDiarization || size <= 0 || size > stt.maxUploadBytes) return false
         return try {
-            val result = transcribeFile(audioFile, durationMs, repo.get(meetingId)?.expectedSpeakers)
+            val result = stage(meetingId, "Detecting speakers with ${stt.config.id.displayName}") {
+                transcribeFile(audioFile, durationMs, repo.get(meetingId)?.expectedSpeakers)
+            }
             if (result.segments.isEmpty()) return false
             replaceTranscript(meetingId, result, durationMs)
             true
@@ -167,7 +205,18 @@ class MeetingPipeline(
         val diarizer = runCatching { ai.stt() }.getOrNull() as? SpeakerDiarizer ?: return false
         if (!settings().localDiarization || !diarizer.diarizationAvailable) return false
         return try {
-            val turns = diarizer.diarize(audioFile, repo.get(meetingId)?.expectedSpeakers)
+            val turns = stage(meetingId, "Detecting speakers on this phone") {
+                coroutineScope {
+                    var last = 0f
+                    diarizer.diarize(audioFile, repo.get(meetingId)?.expectedSpeakers) { fraction ->
+                        // Throttle: the diarizer reports per chunk.
+                        if (fraction - last >= 0.02f || fraction >= 1f) {
+                            last = fraction
+                            launch { progress(meetingId, fraction) }
+                        }
+                    }
+                }
+            }
             if (turns.isEmpty()) return false
             repo.update(meetingId) { m ->
                 val result = SpeakerAssigner.applyTurns(m.segments, turns, random)
@@ -206,25 +255,41 @@ class MeetingPipeline(
                 it.copy(
                     status = if (it.pendingChunks.isEmpty()) MeetingStatus.READY else MeetingStatus.ERROR,
                     lastError = it.lastError ?: "No speech was transcribed.",
+                    processingStep = null,
+                    processingProgress = null,
                 )
             }
             return
         }
-        val errors = mutableListOf<String>()
+        val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
         repo.update(meetingId) { it.copy(status = MeetingStatus.ANALYZING) }
 
         if (s.llmSpeakerSeparation && needsSpeakerSeparation(meeting)) {
-            step(errors, "Speaker separation") { separateSpeakers(meetingId) }
+            step(errors, "Speaker separation") { stage(meetingId, "Separating speakers with AI") { separateSpeakers(meetingId) } }
         }
-        if (s.rememberVoices) step(errors, "Voice recognition") { recognizeVoices(meetingId) }
-        if (s.suggestSpeakerNames) step(errors, "Speaker names") { suggestSpeakerNames(meetingId) }
-        if (s.autoAnalyze) {
-            step(errors, "Summary") { generateInsights(meetingId) }
-            step(errors, "Gaps & questions") { generateGaps(meetingId) }
+        if (s.rememberVoices) {
+            step(errors, "Voice recognition") { stage(meetingId, "Recognising saved voices") { recognizeVoices(meetingId) } }
+        }
+        // Names, summary and gaps only read the transcript, so they run side by side.
+        val aiSteps = buildList {
+            if (s.suggestSpeakerNames) add("Speaker names" to suspend { suggestSpeakerNames(meetingId) })
+            if (s.autoAnalyze) {
+                add("Summary" to suspend { generateInsights(meetingId) })
+                add("Gaps & questions" to suspend { generateGaps(meetingId) })
+            }
+        }
+        if (aiSteps.isNotEmpty()) {
+            stage(meetingId, "Writing summary, action items and questions") {
+                coroutineScope {
+                    aiSteps.map { (name, block) -> async { step(errors, name) { timed(name) { block() } } } }.awaitAll()
+                }
+            }
         }
         repo.update(meetingId) {
             it.copy(
                 status = MeetingStatus.READY,
+                processingStep = null,
+                processingProgress = null,
                 lastError = errors.joinToString("\n").ifEmpty { null } ?: it.lastError?.takeIf { _ -> it.pendingChunks.isNotEmpty() },
             )
         }
@@ -234,6 +299,11 @@ class MeetingPipeline(
     fun needsSpeakerSeparation(meeting: Meeting): Boolean =
         !meeting.speakersFinal && meeting.segments.isNotEmpty() &&
             meeting.segments.all { seg -> meeting.speaker(seg.speakerId)?.label == SpeakerAssigner.UNKNOWN_LABEL }
+
+    private suspend fun <T> timed(name: String, block: suspend () -> T): T {
+        val started = clock.now()
+        return block().also { log("$name: done in ${(clock.now() - started) / 1000}s") }
+    }
 
     private suspend fun step(errors: MutableList<String>, name: String, block: suspend () -> Unit) {
         try {
@@ -346,7 +416,7 @@ class MeetingPipeline(
             if (settings().rememberVoices) recognizeVoices(meetingId)
             if (settings().suggestSpeakerNames) runCatching { suggestSpeakerNames(meetingId) }
         } finally {
-            repo.update(meetingId) { it.copy(status = MeetingStatus.READY) }
+            repo.update(meetingId) { it.copy(status = MeetingStatus.READY, processingStep = null, processingProgress = null) }
         }
     }
 

@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.util.Log
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.app.export.MeetingExporter
 import com.kaliscriber.app.recording.RecordingManager
@@ -88,6 +89,7 @@ class AppContainer(context: Context) {
         meetings, ai, meetingAi, settings,
         voices = voices,
         embedder = { localSpeech },
+        log = { message -> Log.i("KaliScriber", message) },
     )
     val exporter = MeetingExporter(appContext, http, secrets, settings)
     val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope)

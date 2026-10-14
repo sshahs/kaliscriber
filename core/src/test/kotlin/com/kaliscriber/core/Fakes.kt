@@ -54,9 +54,11 @@ class FakeLocalStt(
         return respond(audio)
     }
     var lastSpeakerCount: Int? = null
-    override suspend fun diarize(audio: File, speakers: Int?): List<SpeakerTurn> {
+    override suspend fun diarize(audio: File, speakers: Int?, onProgress: (Float) -> Unit): List<SpeakerTurn> {
         diarizeCalls++
         lastSpeakerCount = speakers
+        onProgress(0.5f)
+        onProgress(1f)
         return turns
     }
 }

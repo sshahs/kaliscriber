@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
@@ -14,7 +15,9 @@ import com.kaliscriber.app.KaliScriberApp
 import com.kaliscriber.app.MainActivity
 import com.kaliscriber.app.R
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -23,14 +26,42 @@ import kotlinx.coroutines.launch
  */
 class RecordingService : LifecycleService() {
 
-    private val manager: RecordingManager get() = (application as KaliScriberApp).container.recorder
+    private val container get() = (application as KaliScriberApp).container
+    private val manager: RecordingManager get() = container.recorder
     private var observer: Job? = null
+    private var stepObserver: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    /**
+     * Without a wake lock the CPU can sleep once the screen is off, which stalls on-device
+     * transcription, speaker detection and the AI requests after the meeting ends.
+     */
+    private fun holdWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        wakeLock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KaliScriber:meeting")
+            .apply {
+                setReferenceCounted(false)
+                acquire(MAX_WAKE_MS)
+            }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wakeLock = null
+    }
+
+    override fun onDestroy() {
+        releaseWakeLock()
+        super.onDestroy()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
             ACTION_START -> {
                 startInForeground(buildNotification(RecordingState.Recording(meetingId = "")))
+                holdWakeLock()
                 if (!manager.beginCapture()) {
                     stopSelfCleanly()
                     return START_NOT_STICKY
@@ -57,10 +88,20 @@ class RecordingService : LifecycleService() {
                     }
                 }
                 .collect { state ->
-                    if (state == RecordingState.Idle) {
-                        stopSelfCleanly()
-                    } else {
-                        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(state))
+                    stepObserver?.cancel()
+                    when (state) {
+                        RecordingState.Idle -> stopSelfCleanly()
+                        is RecordingState.Finishing -> {
+                            notify(buildNotification(state))
+                            // Mirror the processing step ("Detecting speakers… 40%") in the notification.
+                            stepObserver = lifecycleScope.launch {
+                                container.meetings.observe(state.meetingId)
+                                    .map { m -> m?.processingStep to m?.processingProgress?.let { (it * 100).toInt() } }
+                                    .distinctUntilChanged()
+                                    .collect { (step, percent) -> notify(buildNotification(state, step, percent)) }
+                            }
+                        }
+                        is RecordingState.Recording -> notify(buildNotification(state))
                     }
                 }
         }
@@ -71,12 +112,17 @@ class RecordingService : LifecycleService() {
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
     }
 
+    private fun notify(notification: Notification) {
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+    }
+
     private fun stopSelfCleanly() {
+        releaseWakeLock()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun buildNotification(state: RecordingState): Notification {
+    private fun buildNotification(state: RecordingState, step: String? = null, percent: Int? = null): Notification {
         val openApp = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -103,8 +149,8 @@ class RecordingService : LifecycleService() {
             }
             is RecordingState.Finishing -> builder
                 .setContentTitle("Processing meeting")
-                .setContentText("Transcribing and generating insights…")
-                .setProgress(0, 0, true)
+                .setContentText(step?.let { s -> percent?.let { "$s · $it%" } ?: "$s…" } ?: "Finishing the transcript…")
+                .setProgress(100, percent ?: 0, percent == null)
             RecordingState.Idle -> builder.setContentTitle("KaliScriber")
         }
         return builder.build()
@@ -122,5 +168,7 @@ class RecordingService : LifecycleService() {
         const val ACTION_RESUME = "com.kaliscriber.app.RESUME"
         const val ACTION_STOP = "com.kaliscriber.app.STOP"
         private const val NOTIFICATION_ID = 42
+        /** Safety net so a stuck job can never keep the phone awake forever. */
+        private const val MAX_WAKE_MS = 6L * 60 * 60 * 1000
     }
 }

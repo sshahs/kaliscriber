@@ -211,7 +211,8 @@ class MeetingAi(
                 val t = el as? JsonObject ?: return@mapNotNull null
                 val index = (t["i"] as? JsonPrimitive)?.intOrNull ?: (t["index"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
                     ?: return@mapNotNull null
-                Turn(index, t.str("s", "speaker") ?: SpeakerAssigner.UNKNOWN_LABEL, t.str("text"))
+                // "from" marks where a new speaker starts inside a segment; older replies sent the full "text".
+                Turn(index, t.str("s", "speaker") ?: SpeakerAssigner.UNKNOWN_LABEL, t.str("from", "text"))
             }.groupBy { it.index }
 
             window.forEachIndexed { i, seg ->
@@ -231,26 +232,43 @@ class MeetingAi(
         return SpeakerAssigner.Result(speakers.filter { it.id in used }, out)
     }
 
-    private data class Turn(val index: Int, val label: String, val text: String?)
+    private data class Turn(val index: Int, val label: String, val from: String?)
 
-    /** Splits [seg] into the model's turns when its text faithfully matches, otherwise keeps it whole. */
+    /**
+     * Splits [seg] where the model says another speaker starts ("from" = their first words). Cut
+     * points that can't be found in the text are ignored, so the transcript text is never changed.
+     */
     private fun splitSegment(seg: TranscriptSegment, turns: List<Turn>): List<Pair<String, TranscriptSegment>> {
         if (turns.isEmpty()) return listOf(SpeakerAssigner.UNKNOWN_LABEL to seg)
-        val withText = turns.filter { !it.text.isNullOrBlank() }
-        val joined = withText.joinToString(" ") { it.text!!.trim() }
-        val faithful = withText.size == turns.size && turns.size > 1 &&
-            normalized(joined) == normalized(seg.text)
-        if (!faithful) return listOf(turns.first().label to seg)
-
-        val total = withText.sumOf { it.text!!.length }.coerceAtLeast(1)
-        val span = (seg.endMs - seg.startMs).coerceAtLeast(0)
-        var cursor = seg.startMs
-        return withText.mapIndexed { i, turn ->
-            val end = if (i == withText.lastIndex) seg.endMs else cursor + span * turn.text!!.length / total
-            val piece = seg.copy(id = Ids.new(), startMs = cursor, endMs = end, text = turn.text!!.trim())
-            cursor = end
-            turn.label to piece
+        val text = seg.text
+        // (start offset in text, speaker label), in order.
+        val cuts = mutableListOf(0 to turns.first().label)
+        for (turn in turns.drop(1)) {
+            val from = turn.from?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+            val at = findFrom(text, from, after = cuts.last().first + 1) ?: continue
+            if (turn.label == cuts.last().second) continue
+            cuts += at to turn.label
         }
+        if (cuts.size == 1) return listOf(cuts.first().second to seg)
+
+        val total = text.length.coerceAtLeast(1)
+        val span = (seg.endMs - seg.startMs).coerceAtLeast(0)
+        return cuts.mapIndexed { i, (start, label) ->
+            val end = if (i == cuts.lastIndex) text.length else cuts[i + 1].first
+            val startMs = seg.startMs + span * start / total
+            val endMs = if (i == cuts.lastIndex) seg.endMs else seg.startMs + span * end / total
+            label to seg.copy(id = Ids.new(), startMs = startMs, endMs = endMs, text = text.substring(start, end).trim())
+        }.filter { it.second.text.isNotEmpty() }
+    }
+
+    /** Index in [text] where the words of [from] start (case and punctuation insensitive), at or after [after]. */
+    private fun findFrom(text: String, from: String, after: Int): Int? {
+        val direct = text.indexOf(from, after, ignoreCase = true)
+        if (direct >= 0) return direct
+        val words = from.split(Regex("\\s+")).map { w -> w.trim { !it.isLetterOrDigit() } }.filter { it.isNotEmpty() }
+        if (words.isEmpty()) return null
+        val pattern = words.joinToString("[^\\p{L}\\p{N}]+") { Regex.escape(it) }
+        return Regex(pattern, RegexOption.IGNORE_CASE).find(text, after.coerceAtMost(text.length))?.range?.first
     }
 
     private fun normalized(s: String) = s.lowercase().filter { it.isLetterOrDigit() }

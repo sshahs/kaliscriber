@@ -27,6 +27,10 @@ data class Meeting(
     val speakersFinal: Boolean = false,
     val lastError: String? = null,
     val briefing: Briefing? = null,
+    /** What processing is doing right now (e.g. "Detecting speakers"), shown while it runs. */
+    val processingStep: String? = null,
+    /** Progress of [processingStep] from 0 to 1, when known. */
+    val processingProgress: Float? = null,
     /** How many people are in the meeting, if the user said; null lets the app detect it. */
     val expectedSpeakers: Int? = null,
     val updatedAt: Long = createdAt,

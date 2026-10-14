@@ -125,8 +125,8 @@ Return ONLY a JSON object:
     const val SEPARATE_SPEAKERS_SYSTEM = """You are diarizing a meeting transcript that has no reliable speaker labels. Each input line is one segment: "<index>| text". A segment may contain more than one speaker.
 Work out who said what from turn-taking cues: questions and answers, greetings, people addressing each other, "I"/"you" references, changes of topic or style.
 Label speakers S1, S2, S3... in order of first appearance, reusing the labels already established when they are given. Use "?" only when you genuinely cannot tell.
-Return ONLY a JSON object listing every segment in order, splitting a segment into several turns when the speaker changes inside it. Copy the text exactly; do not correct, translate or summarise it:
-{"turns": [{"i": 0, "s": "S1", "text": "exact text"}]}"""
+Return ONLY a compact JSON object. Give every segment index with its speaker. Do not repeat the segment text. When the speaker changes inside a segment, add another entry for the same index whose "from" holds the first 3 to 6 words of the new speaker's part, copied exactly:
+{"turns": [{"i": 0, "s": "S1"}, {"i": 1, "s": "S2"}, {"i": 1, "s": "S1", "from": "Sure, I can take"}]}"""
 
     const val SPOKEN_ANSWER_RULE = """The user is talking to you by voice and will hear your answer read aloud. Reply in two to four short, natural spoken sentences. No Markdown, lists, headings or symbols. Say times like "about twelve minutes in" rather than citing [12:34]."""
 

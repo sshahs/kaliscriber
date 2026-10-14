@@ -63,7 +63,8 @@ data class SpeakerTurn(val startMs: Long, val endMs: Long, val speaker: String)
  */
 interface SpeakerDiarizer {
     val diarizationAvailable: Boolean
-    suspend fun diarize(audio: File, speakers: Int? = null): List<SpeakerTurn>
+    /** [onProgress] reports 0..1 while the (possibly long) pass runs. */
+    suspend fun diarize(audio: File, speakers: Int? = null, onProgress: (Float) -> Unit = {}): List<SpeakerTurn>
 }
 
 /**

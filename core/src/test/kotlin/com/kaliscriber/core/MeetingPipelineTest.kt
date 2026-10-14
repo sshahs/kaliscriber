@@ -174,6 +174,35 @@ class MeetingPipelineTest {
     }
 
     @Test
+    fun `compact speaker separation splits segments at the given words`() = runTest {
+        val stt = FakeStt(supportsDiarization = false) {
+            SttResult(
+                listOf(RawSegment(0, 6_000, "Can you send the deck? Sure, I'll send it today."), RawSegment(6_000, 8_000, "Thanks.")),
+                diarized = false,
+            )
+        }
+        val compact = FakeLlm { req ->
+            if (req.system == Prompts.SEPARATE_SPEAKERS_SYSTEM) {
+                // "from" words differ in case and punctuation from the transcript.
+                """{"turns":[{"i":0,"s":"S1"},{"i":0,"s":"S2","from":"sure i'll send"},{"i":1,"s":"S1"}]}"""
+            } else {
+                "{}"
+            }
+        }
+        settings = settings.copy(autoAnalyze = false, suggestSpeakerNames = false)
+        val p = pipeline(FakeAi(compact, stt))
+        val meeting = repo.create()
+        p.transcribeChunk(meeting.id, AudioChunk(0, chunkFile("c0.wav").path, 0, 8_000))
+        p.finishRecording(meeting.id, null, 8_000)
+
+        val m = repo.get(meeting.id)!!
+        assertEquals(listOf("Can you send the deck?", "Sure, I'll send it today.", "Thanks."), m.segments.map { it.text })
+        assertEquals(m.segments[0].speakerId, m.segments[2].speakerId)
+        assertTrue(m.segments[0].speakerId != m.segments[1].speakerId)
+        assertNull(m.processingStep, "progress is cleared when processing ends")
+    }
+
+    @Test
     fun `asking about an excerpt records the conversation`() = runTest {
         val stt = FakeStt(false) { SttResult(listOf(RawSegment(0, 5_000, "We ship on the third.")), false) }
         val fakeLlm = llm()
