@@ -17,6 +17,10 @@ import kotlin.random.Random
 object SpeakerAssigner {
 
     const val UNKNOWN_LABEL = "?"
+    /** Label prefix of speakers found by diarizing the whole recording. */
+    const val DIARIZED_PREFIX = "diar:"
+    /** Label prefix of speakers found while the meeting was being recorded. */
+    const val LIVE_PREFIX = "live:"
     private const val MIN_RUN_WORDS = 3
     private const val MIN_RUN_MS = 1_000L
 
@@ -56,20 +60,37 @@ object SpeakerAssigner {
         segments: List<TranscriptSegment>,
         turns: List<SpeakerTurn>,
         random: Random = Random.Default,
+    ): Result = relabel(emptyList(), segments, turns, DIARIZED_PREFIX, random = random)
+
+    /**
+     * Labels the segments that start before [untilMs] with the speakers in [turns], each turn
+     * speaker becoming the meeting speaker labelled [prefix] + its id. Speakers in [existing] with
+     * that label are kept, so names given meanwhile stay; new ones get placeholder names. Later
+     * segments are left as they are, and speakers left without any line are removed.
+     */
+    fun relabel(
+        existing: List<Speaker>,
+        segments: List<TranscriptSegment>,
+        turns: List<SpeakerTurn>,
+        prefix: String,
+        untilMs: Long = Long.MAX_VALUE,
+        random: Random = Random.Default,
     ): Result {
-        val speakers = mutableListOf<Speaker>()
-        fun speakerFor(label: String) = speakers.firstOrNull { it.label == label }
+        val speakers = existing.toMutableList()
+        fun speakerFor(label: String) = speakers.firstOrNull { it.hasLabel(label) }
             ?: newPlaceholder(speakers, label, random).also { speakers += it }
         val labelled = segments.flatMap { seg ->
+            if (seg.startMs >= untilMs) return@flatMap listOf(seg)
             val pieces = splitAtTurns(seg, turns)
             if (pieces != null) {
-                pieces.map { (speaker, piece) -> piece.copy(speakerId = speakerFor("diar:$speaker").id) }
+                pieces.map { (speaker, piece) -> piece.copy(speakerId = speakerFor("$prefix$speaker").id) }
             } else {
-                val label = bestTurn(seg, turns)?.let { "diar:${it.speaker}" } ?: UNKNOWN_LABEL
+                val label = bestTurn(seg, turns)?.let { "$prefix${it.speaker}" } ?: UNKNOWN_LABEL
                 listOf(seg.copy(speakerId = speakerFor(label).id))
             }
         }
-        return Result(speakers, labelled)
+        val used = labelled.mapNotNull { it.speakerId }.toSet()
+        return Result(speakers.filter { it.id in used }, labelled)
     }
 
     /**

@@ -59,6 +59,8 @@ import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.app.ui.common.EmptyState
 import com.kaliscriber.app.ui.common.SpeakerBadge
 import com.kaliscriber.core.model.Meeting
+import com.kaliscriber.core.model.MeetingStatus
+import com.kaliscriber.core.speakers.SpeakerAssigner
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -226,16 +228,31 @@ private fun LiveTranscript(meeting: Meeting?, modifier: Modifier = Modifier) {
         EmptyState(
             Icons.Filled.GraphicEq,
             "Live transcript",
-            "Speech appears here as it is transcribed. Speakers the app can't identify get a random name you can change later.",
+            "Speech appears here as it is transcribed. Speakers are identified every ten minutes; ones the app doesn't know get a random name you can change.",
             modifier,
         )
         return
+    }
+    // Speakers are detected in ten-minute blocks while recording; until then a line has no one to show.
+    val identifiedUntil = segments.lastOrNull { meeting?.speaker(it.speakerId)?.label?.startsWith(SpeakerAssigner.LIVE_PREFIX) == true }?.endMs
+    if (identifiedUntil != null) {
+        Text(
+            "Speakers identified up to ${TranscriptFormatter.timestamp(identifiedUntil)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
     }
     LazyColumn(modifier, state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         items(segments, key = { it.id }) { seg ->
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SpeakerBadge(meeting?.speaker(seg.speakerId))
+                    val speaker = meeting?.speaker(seg.speakerId)
+                    if (speaker?.label == SpeakerAssigner.UNKNOWN_LABEL && meeting?.status == MeetingStatus.RECORDING) {
+                        Text("Speaker not identified yet", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        SpeakerBadge(speaker)
+                    }
                     Spacer(Modifier.width(8.dp))
                     Text(TranscriptFormatter.timestamp(seg.startMs), style = MaterialTheme.typography.labelSmall)
                 }

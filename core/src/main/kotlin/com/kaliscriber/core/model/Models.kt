@@ -71,7 +71,11 @@ data class Speaker(
     val embedding: List<Float>? = null,
     /** Saved voice this speaker was recognised as, or enrolled into. */
     val voiceProfileId: String? = null,
-)
+    /** Labels of speakers merged into this one, so later detection keeps them together. */
+    val aliases: List<String> = emptyList(),
+) {
+    fun hasLabel(l: String): Boolean = label == l || l in aliases
+}
 
 @Serializable
 data class TranscriptSegment(

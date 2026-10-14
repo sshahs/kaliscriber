@@ -88,8 +88,12 @@ class MeetingRepository(
 
     private fun merge(m: Meeting, fromId: String, intoId: String): Meeting {
         if (fromId == intoId || m.speaker(intoId) == null) return m
+        val from = m.speaker(fromId)
+        val labels = listOfNotNull(from?.label) + from?.aliases.orEmpty()
         return m.copy(
-            speakers = m.speakers.filter { it.id != fromId },
+            speakers = m.speakers.filter { it.id != fromId }.map {
+                if (it.id == intoId && labels.isNotEmpty()) it.copy(aliases = (it.aliases + labels).distinct() - setOfNotNull(it.label)) else it
+            },
             segments = m.segments.map { if (it.speakerId == fromId) it.copy(speakerId = intoId) else it },
         )
     }

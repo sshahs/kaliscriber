@@ -20,6 +20,7 @@ import com.kaliscriber.core.model.MeetingSection
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.speakers.BlockMerge
 import com.kaliscriber.core.speakers.SpeakerAssigner
+import com.kaliscriber.core.speakers.StableSpeakers
 import com.kaliscriber.core.speakers.VoiceLibrary
 import com.kaliscriber.core.store.MeetingRepository
 import com.kaliscriber.core.tasks.ActionItems
@@ -84,6 +85,8 @@ class MeetingPipeline(
         /** Every chunk seen, so their audio files can be removed when the meeting ends. */
         val chunks = mutableListOf<AudioChunk>()
         val blocks = mutableListOf<DiarizedBlock>()
+        /** Keeps each speaker's identity as blocks are added and merged again. */
+        val stable = StableSpeakers()
         var diarizing: Job? = null
         var notes: Job? = null
         @Volatile var diarizationFailed = false
@@ -139,6 +142,16 @@ class MeetingPipeline(
                         "Live speaker detection: ${TranscriptFormatter.timestamp(block.first().startMs)}–" +
                             "${TranscriptFormatter.timestamp(block.last().endMs)} in ${(clock.now() - started) / 1000}s, ${result.voices.size} voices",
                     )
+                    // The transcript so far shows who is speaking while the meeting goes on; the end labels it all.
+                    if (!final) {
+                        try {
+                            labelLiveSpeakers(meetingId, session, untilMs = block.last().endMs)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            log("Labelling speakers during the meeting failed: ${describe(e)}")
+                        }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -150,20 +163,48 @@ class MeetingPipeline(
     }
 
     /**
-     * Ends live work for a meeting: diarizes the last block and joins all blocks into speaker turns.
-     * Null when live detection did not cover the whole meeting, so the full recording is used instead.
+     * Labels the transcript up to [untilMs] with the speakers found in the blocks diarized so far.
+     * Speakers keep their names from one update to the next, including names given during the
+     * meeting, and voices saved in voice memory are named straight away. False if there were no turns.
      */
-    private suspend fun finishLive(meetingId: String): List<SpeakerTurn>? {
-        val session = live.remove(meetingId) ?: return null
+    private suspend fun labelLiveSpeakers(meetingId: String, session: LiveSession, untilMs: Long, final: Boolean = false): Boolean {
+        val merged = session.stable.stabilize(BlockMerge.mergeWithVoices(session.blocks, repo.get(meetingId)?.expectedSpeakers))
+        if (merged.turns.isEmpty()) return false
+        val prints = merged.voices.mapValues { it.value.embedding }
+        val matches = voices?.assign(prints).orEmpty()
+        repo.update(meetingId) { m ->
+            val result = SpeakerAssigner.relabel(m.speakers, m.segments, merged.turns, SpeakerAssigner.LIVE_PREFIX, untilMs, random)
+            val speakers = result.speakers.map { sp ->
+                val key = sp.label?.takeIf { it.startsWith(SpeakerAssigner.LIVE_PREFIX) }?.removePrefix(SpeakerAssigner.LIVE_PREFIX)
+                val print = key?.let(prints::get) ?: return@map sp
+                val match = matches[key]
+                if (match != null && sp.isPlaceholder && result.speakers.none { it.id != sp.id && it.name.equals(match.profile.name, true) }) {
+                    sp.copy(name = match.profile.name, isPlaceholder = false, voiceProfileId = match.profile.id, embedding = print.toList())
+                } else {
+                    sp.copy(embedding = print.toList())
+                }
+            }
+            m.copy(speakers = speakers, segments = result.segments, speakersFinal = m.speakersFinal || final)
+        }
+        return true
+    }
+
+    /**
+     * Ends live work for a meeting: diarizes the last block and labels the whole transcript with the
+     * speakers found during the meeting. False when live detection did not cover the whole meeting,
+     * so the full recording is used instead.
+     */
+    private suspend fun finishLive(meetingId: String): Boolean {
+        val session = live.remove(meetingId) ?: return false
         session.notes?.cancelAndJoin()
         try {
-            if (session.firstChunk != 0 || session.diarizationFailed || liveDiarizer() == null) return null
+            if (session.firstChunk != 0 || session.diarizationFailed || liveDiarizer() == null) return false
             stage(meetingId, "Detecting speakers in the last part of the meeting") {
                 session.diarizing?.join()
                 diarizeLiveBlocks(meetingId, session, final = true)
             }
-            if (session.diarizationFailed || session.blocks.isEmpty()) return null
-            return BlockMerge.merge(session.blocks, repo.get(meetingId)?.expectedSpeakers).takeIf { it.isNotEmpty() }
+            if (session.diarizationFailed || session.blocks.isEmpty()) return false
+            return labelLiveSpeakers(meetingId, session, untilMs = Long.MAX_VALUE, final = true)
         } finally {
             val pending = repo.get(meetingId)?.pendingChunks.orEmpty().map { it.path }.toSet()
             session.chunks.filter { it.path !in pending }.forEach { deleteQuietly(it.path) }
@@ -290,15 +331,8 @@ class MeetingPipeline(
         // On-device engines label the live transcript, so parts that failed to transcribe are retried first.
         val onDevice = runCatching { ai.stt() }.getOrNull() is SpeakerDiarizer
         if (onDevice) retryPendingChunks(meetingId)
-        val liveTurns = finishLive(meetingId)
         val outcome = when {
-            liveTurns != null -> {
-                repo.update(meetingId) { m ->
-                    val result = SpeakerAssigner.applyTurns(m.segments, liveTurns, random)
-                    m.copy(speakers = result.speakers, segments = result.segments, speakersFinal = true)
-                }
-                Detection.DONE
-            }
+            finishLive(meetingId) -> Detection.DONE
             audioFile != null && settings().finalDiarizationPass -> tryFullDiarization(meetingId, audioFile, durationMs)
             else -> Detection.SKIPPED
         }
