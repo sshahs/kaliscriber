@@ -108,6 +108,26 @@ class NoteViewModel(private val container: AppContainer, val noteId: String) : V
         _result.value = null
     }
 
+    val speaking: StateFlow<String?> = container.speech.speaking
+
+    fun toggleReadAloud() {
+        if (speaking.value == speechKey) {
+            container.speech.stop()
+            return
+        }
+        val text = listOf(_title.value, _content.value).filter { it.isNotBlank() }.joinToString("\n\n")
+        viewModelScope.launch {
+            try {
+                container.speech.speak(speechKey, text)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _messages.send(e.message ?: "Could not read aloud")
+            }
+        }
+    }
+
+    private val speechKey get() = "note-$noteId"
+
     fun toggleDictation() {
         if (_dictating.value) stopDictation() else startDictation()
     }
@@ -150,6 +170,7 @@ class NoteViewModel(private val container: AppContainer, val noteId: String) : V
     }
 
     override fun onCleared() {
+        if (speaking.value == speechKey) container.speech.stop()
         dictation.stop()?.delete()
         if (!exists) return
         val t = _title.value

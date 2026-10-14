@@ -11,7 +11,12 @@ import com.kaliscriber.core.ai.llm.LlmClients
 import com.kaliscriber.core.ai.llm.LlmMessage
 import com.kaliscriber.core.ai.llm.LlmRequest
 import com.kaliscriber.core.ai.llm.LlmRole
+import com.kaliscriber.app.speech.LocalModel
+import com.kaliscriber.app.speech.ModelRole
+import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.core.ai.stt.SttClients
+import com.kaliscriber.core.ai.tts.ElevenLabsTts
+import com.kaliscriber.core.ai.tts.Voice
 import com.kaliscriber.core.audio.Wav
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +33,9 @@ data class ProviderDraft(
     val baseUrl: String,
     val chatModel: String,
     val sttModel: String,
+    val zeroDataRetention: Boolean = true,
+    val voiceId: String = "",
+    val ttsModel: String = "",
 )
 
 sealed interface ProviderStatus {
@@ -35,11 +43,41 @@ sealed interface ProviderStatus {
     data class Ok(val message: String) : ProviderStatus
     data class Failed(val message: String) : ProviderStatus
     data class Models(val models: List<String>) : ProviderStatus
+    data class Voices(val voices: List<Voice>) : ProviderStatus
 }
 
 class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     val settings: StateFlow<AppSettings> = container.settingsStore.value
     val configuredKeys: StateFlow<Set<ProviderId>> = container.secrets.configured
+    val modelStates: StateFlow<Map<String, ModelState>> = container.models.states
+
+    init {
+        viewModelScope.launch { container.models.refresh() }
+    }
+
+    fun downloadModel(model: LocalModel) {
+        container.models.download(model)
+        // The first recognizer downloaded becomes the active one.
+        if (model.role == ModelRole.ASR && container.models.readyAsrModels().isEmpty()) {
+            update { it.copy(localAsrModel = model.id) }
+        }
+    }
+
+    fun cancelModel(model: LocalModel) = container.models.cancel(model)
+
+    fun deleteModel(model: LocalModel) {
+        viewModelScope.launch {
+            container.localSpeech.unload()
+            container.models.delete(model)
+        }
+    }
+
+    fun selectLocalModel(model: LocalModel) {
+        update { it.copy(localAsrModel = model.id) }
+        viewModelScope.launch { container.localSpeech.unload() }
+    }
+
+    fun downloadDiarization() = container.models.downloadDiarization()
 
     private val _status = MutableStateFlow<Map<ProviderId, ProviderStatus>>(emptyMap())
     val status: StateFlow<Map<ProviderId, ProviderStatus>> = _status.asStateFlow()
@@ -51,6 +89,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             baseUrl = s.baseUrl,
             chatModel = s.chatModel,
             sttModel = s.sttModel,
+            zeroDataRetention = s.zeroDataRetention,
+            voiceId = s.voiceId,
+            ttsModel = s.ttsModel,
         )
     }
 
@@ -62,17 +103,29 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { container.secrets.setApiKey(id, draft.apiKey) }
             container.settingsStore.update {
-                it.withProvider(id) {
-                    ProviderSettings(baseUrl = draft.baseUrl.trim(), chatModel = draft.chatModel.trim(), sttModel = draft.sttModel.trim())
-                }
+                it.withProvider(id) { _ -> draft.toSettings() }
             }
             setStatus(id, ProviderStatus.Ok("Saved"))
         }
     }
 
+    private fun ProviderDraft.toSettings() = ProviderSettings(
+        baseUrl = baseUrl.trim(),
+        chatModel = chatModel.trim(),
+        sttModel = sttModel.trim(),
+        zeroDataRetention = zeroDataRetention,
+        ttsModel = ttsModel.trim(),
+        voiceId = voiceId.trim(),
+    )
+
     private fun configFor(id: ProviderId, draft: ProviderDraft) = AppSettings()
-        .withProvider(id) { ProviderSettings(draft.baseUrl.trim(), draft.chatModel.trim(), draft.sttModel.trim()) }
+        .withProvider(id) { draft.toSettings() }
         .configFor(id, draft.apiKey)
+
+    fun listVoices(id: ProviderId, draft: ProviderDraft) = runForStatus(id) {
+        val voices = ElevenLabsTts(configFor(id, draft), container.http).listVoices()
+        if (voices.isEmpty()) ProviderStatus.Failed("No voices found") else ProviderStatus.Voices(voices)
+    }
 
     fun fetchModels(id: ProviderId, draft: ProviderDraft) = runForStatus(id) {
         val models = LlmClients.create(configFor(id, draft), container.http).listModels()
@@ -91,7 +144,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
                     maxTokens = 16,
                 ),
             )
-            ProviderStatus.Ok("Chat works with ${config.chatModel}: “${reply.trim().take(40)}”")
+            val zdr = if (config.zeroDataRetention) " (zero data retention)" else ""
+            ProviderStatus.Ok("Chat works with ${config.chatModel}$zdr: “${reply.trim().take(40)}”")
         } else {
             val silence = File(container.appContext.cacheDir, "silence.wav")
             withContext(Dispatchers.IO) {

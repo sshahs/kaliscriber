@@ -24,6 +24,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Visibility
@@ -34,6 +37,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,6 +71,9 @@ import com.kaliscriber.app.ui.common.DropdownSelector
 import com.kaliscriber.app.ui.common.SectionCard
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.ProviderId
+import com.kaliscriber.app.speech.ModelCatalog
+import com.kaliscriber.app.speech.ModelState
+import com.kaliscriber.core.ai.TtsEngine
 import com.kaliscriber.core.ai.stt.SttClients
 import kotlin.math.roundToInt
 
@@ -74,6 +83,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val keys by vm.configuredKeys.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
+    val modelStates by vm.modelStates.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
 
     Scaffold(
@@ -92,6 +102,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { ActiveServices(settings, keys, vm) }
+            item { LocalSpeechSection(settings, modelStates, vm) }
             item {
                 Column {
                     Text("Providers & API keys", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
@@ -102,7 +113,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     )
                 }
             }
-            items(ProviderId.entries.toList(), key = { it.name }) { id ->
+            items(ProviderId.entries.filter { it != ProviderId.LOCAL }, key = { it.name }) { id ->
                 ProviderCard(
                     id = id,
                     settings = settings,
@@ -150,12 +161,110 @@ private fun ActiveServices(settings: AppSettings, keys: Set<ProviderId>, vm: Set
             modifier = Modifier.fillMaxWidth(),
         )
         val sttConfig = settings.configFor(settings.sttProvider, null)
-        val diarizes = SttClients.supportsDiarization(sttConfig.id, sttConfig.sttModel)
-        Text(
-            "Model: ${sttConfig.sttModel.ifBlank { "provider default" }} · " +
-                if (diarizes) "detects speakers" else "no speaker detection (AI will separate speakers from the text)",
-            style = MaterialTheme.typography.bodySmall,
+        if (settings.sttProvider == ProviderId.LOCAL) {
+            val model = ModelCatalog.asrModels.firstOrNull { it.id == settings.localAsrModel }
+            Text(
+                "Audio never leaves your phone. Model: ${model?.name ?: "choose one below"}" +
+                    if (settings.localDiarization) " · speakers detected on-device when a meeting ends" else "",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        } else {
+            val diarizes = SttClients.supportsDiarization(sttConfig.id, sttConfig.sttModel)
+            Text(
+                "Model: ${sttConfig.sttModel.ifBlank { "provider default" }} · " +
+                    if (diarizes) "detects speakers" else "no speaker detection (AI will separate speakers from the text)",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        DropdownSelector(
+            label = "Voice for reading aloud & audio briefings",
+            selected = settings.ttsEngine,
+            options = TtsEngine.entries.toList(),
+            optionLabel = { it.displayName + if (it == TtsEngine.ELEVENLABS && ProviderId.ELEVENLABS !in keys) " (no key)" else "" },
+            onSelect = { engine -> vm.update { it.copy(ttsEngine = engine) } },
+            modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+@Composable
+private fun LocalSpeechSection(settings: AppSettings, states: Map<String, ModelState>, vm: SettingsViewModel) {
+    SectionCard("On-device speech") {
+        Text(
+            "Private, offline transcription with sherpa-onnx. Download a model once over Wi-Fi; recording then works without internet.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ModelCatalog.asrModels.forEach { model ->
+            val state = states[model.id] ?: ModelState.NotDownloaded
+            val ready = state is ModelState.Ready
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = settings.localAsrModel == model.id,
+                    onClick = { vm.selectLocalModel(model) },
+                    enabled = ready,
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        model.name + if (model == ModelCatalog.recommended) "  ·  recommended" else "",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text("${model.languages} · ${model.downloadMb} MB", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(model.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ModelStateLine(state)
+                }
+                ModelAction(state, onDownload = { vm.downloadModel(model) }, onCancel = { vm.cancelModel(model) }, onDelete = { vm.deleteModel(model) })
+            }
+        }
+        HorizontalDivider()
+        val diarizationStates = ModelCatalog.diarization.map { states[it.id] ?: ModelState.NotDownloaded }
+        val diarizationReady = diarizationStates.all { it is ModelState.Ready }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Speaker detection pack", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Tells voices apart on-device when a meeting ends (${ModelCatalog.diarization.sumOf { it.downloadMb }} MB). " +
+                        "Unrecognised speakers still get a random name you can change.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                diarizationStates.firstOrNull { it !is ModelState.Ready && it !is ModelState.NotDownloaded }?.let { ModelStateLine(it) }
+            }
+            when {
+                diarizationReady -> IconButton(onClick = { ModelCatalog.diarization.forEach(vm::deleteModel) }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Delete speaker models")
+                }
+                diarizationStates.any { it is ModelState.Downloading } -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                else -> IconButton(onClick = vm::downloadDiarization) { Icon(Icons.Filled.Download, contentDescription = "Download speaker models") }
+            }
+        }
+        ToggleRow(
+            "Detect speakers on-device",
+            if (diarizationReady) "Runs after each meeting; long meetings take a few minutes." else "Download the speaker detection pack first.",
+            settings.localDiarization,
+        ) { v -> vm.update { it.copy(localDiarization = v) } }
+    }
+}
+
+@Composable
+private fun ModelStateLine(state: ModelState) {
+    when (state) {
+        is ModelState.Downloading -> Column {
+            LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            Text("Downloading ${(state.progress * 100).toInt()}% · keep the app open", style = MaterialTheme.typography.labelSmall)
+        }
+        is ModelState.Ready -> Text("Downloaded · ${state.bytes / 1_000_000} MB on device", style = MaterialTheme.typography.labelSmall)
+        is ModelState.Failed -> Text(state.message, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+        ModelState.NotDownloaded -> Unit
+    }
+}
+
+@Composable
+private fun ModelAction(state: ModelState, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit) {
+    when (state) {
+        is ModelState.Downloading -> IconButton(onClick = onCancel) { Icon(Icons.Filled.Close, contentDescription = "Cancel download") }
+        is ModelState.Ready -> IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete model") }
+        else -> IconButton(onClick = onDownload) { Icon(Icons.Filled.Download, contentDescription = "Download model") }
     }
 }
 
@@ -201,6 +310,7 @@ private fun ProviderCard(
             var draft by remember(id) { mutableStateOf(vm.draftFor(id)) }
             var showKey by remember { mutableStateOf(false) }
             var modelMenu by remember { mutableStateOf(false) }
+            var voiceMenu by remember { mutableStateOf(false) }
             Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = draft.apiKey,
@@ -256,6 +366,42 @@ private fun ProviderCard(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                if (id.supportsZdr) {
+                    ToggleRow(
+                        "Zero data retention (ZDR)",
+                        "Sends x-cmd-zdr so Command Code only routes to upstreams that keep nothing. Models without a ZDR route fail instead of falling back.",
+                        draft.zeroDataRetention,
+                    ) { draft = draft.copy(zeroDataRetention = it) }
+                }
+                if (id.supportsTts) {
+                    Column {
+                        OutlinedTextField(
+                            value = draft.voiceId,
+                            onValueChange = { draft = draft.copy(voiceId = it) },
+                            label = { Text("Voice ID (reading aloud & briefings)") },
+                            placeholder = { Text(ProviderId.DEFAULT_ELEVENLABS_VOICE) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        val voices = (status as? ProviderStatus.Voices)?.voices.orEmpty()
+                        DropdownMenu(expanded = voiceMenu && voices.isNotEmpty(), onDismissRequest = { voiceMenu = false }) {
+                            voices.forEach { voice ->
+                                DropdownMenuItem(text = { Text(voice.name) }, onClick = {
+                                    draft = draft.copy(voiceId = voice.id)
+                                    voiceMenu = false
+                                })
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = draft.ttsModel,
+                        onValueChange = { draft = draft.copy(ttsModel = it) },
+                        label = { Text("Text-to-speech model") },
+                        placeholder = { Text(ProviderId.DEFAULT_ELEVENLABS_TTS_MODEL) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 if (id == ProviderId.OLLAMA_CLOUD) {
                     Text(
                         "Uses Ollama's cloud models at ollama.com with your API key. You can also point the base URL at any remote Ollama server.",
@@ -279,6 +425,12 @@ private fun ProviderCard(
                             vm.fetchModels(id, draft)
                         }) { Text("List models") }
                     }
+                    if (id.supportsTts) {
+                        OutlinedButton(onClick = {
+                            voiceMenu = true
+                            vm.listVoices(id, draft)
+                        }) { Text("List voices") }
+                    }
                     if (id.keyUrl.isNotBlank()) {
                         TextButton(onClick = {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(id.keyUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -291,6 +443,10 @@ private fun ProviderCard(
                     is ProviderStatus.Failed -> Text(status.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     is ProviderStatus.Models -> Text(
                         "${status.models.size} models found. Tap \"List models\" to pick one.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    is ProviderStatus.Voices -> Text(
+                        "${status.voices.size} voices found. Tap \"List voices\" to pick one.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     null -> Unit

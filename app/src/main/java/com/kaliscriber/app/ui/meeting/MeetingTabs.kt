@@ -2,6 +2,25 @@
 
 package com.kaliscriber.app.ui.meeting
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -128,6 +147,7 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
         return
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { ListenRow(meeting, busy, vm) }
         if (Busy.INSIGHTS in busy) item { Text("Regenerating…", style = MaterialTheme.typography.bodySmall) }
         if (insights.summary.isNotBlank()) {
             item { SectionCard("Summary", Icons.Filled.Subject) { MarkdownText(insights.summary) } }
@@ -196,6 +216,81 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
             item { SectionCard("Tone", Icons.Filled.Forum) { Text(insights.sentiment, style = MaterialTheme.typography.bodyMedium) } }
         }
     }
+}
+
+@Composable
+private fun ListenRow(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
+    val speaking by vm.speaking.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val briefing = meeting.briefing
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Headphones, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Listen", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                if (speaking != null) {
+                    TextButton(onClick = vm::stopSpeaking) {
+                        Icon(Icons.Filled.Stop, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Stop")
+                    }
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedButton(
+                    onClick = { vm.speak(MeetingViewModel.SUMMARY_KEY, vm.summaryForSpeech()) },
+                    enabled = speaking != MeetingViewModel.SUMMARY_KEY,
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Read summary")
+                }
+                when {
+                    Busy.BRIEFING in busy -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Creating audio briefing…", style = MaterialTheme.typography.bodySmall)
+                    }
+                    briefing?.audioPath != null -> {
+                        FilledTonalButton(onClick = vm::playBriefing, enabled = speaking != MeetingViewModel.BRIEFING_KEY) {
+                            Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Play briefing")
+                        }
+                        IconButton(onClick = { shareAudio(context, File(briefing.audioPath!!), meeting.title) }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share briefing")
+                        }
+                        IconButton(onClick = vm::regenerateBriefing) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "Recreate briefing")
+                        }
+                    }
+                    else -> OutlinedButton(onClick = vm::createBriefing) {
+                        Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Create audio briefing")
+                    }
+                }
+            }
+            if (briefing?.audioPath != null) {
+                Text(
+                    "A one-to-two minute spoken catch-up you can listen to or send to someone who missed the meeting.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
+private fun shareAudio(context: Context, file: File, title: String) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = if (file.extension == "mp3") "audio/mpeg" else "audio/wav"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, "Audio briefing: $title")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(send, "Share briefing").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -470,6 +565,20 @@ private fun EditSegmentDialog(segment: TranscriptSegment, onDismiss: () -> Unit,
 @Composable
 fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
     val excerpt by vm.excerpt.collectAsStateWithLifecycle()
+    val speaking by vm.speaking.collectAsStateWithLifecycle()
+    val voicePhase by vm.voicePhase.collectAsStateWithLifecycle()
+    val voiceLevel by vm.voiceLevel.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.startVoice()
+    }
+    fun toggleVoice() {
+        when {
+            voicePhase != VoicePhase.OFF -> vm.stopVoice()
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED -> vm.startVoice()
+            else -> micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
     val thinking = Busy.ASK in busy
@@ -537,6 +646,17 @@ fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
                                     Text(message.content, style = MaterialTheme.typography.bodyMedium)
                                 } else {
                                     SelectionContainer { MarkdownText(message.content) }
+                                    val isSpeaking = speaking == message.id
+                                    IconButton(
+                                        onClick = { if (isSpeaking) vm.stopSpeaking() else vm.speak(message.id, message.content) },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            if (isSpeaking) Icons.Filled.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                                            contentDescription = if (isSpeaking) "Stop reading" else "Read aloud",
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -567,17 +687,67 @@ fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                placeholder = { Text("Ask about the meeting…") },
-                modifier = Modifier.weight(1f),
-                maxLines = 4,
-            )
-            IconButton(onClick = { send(input) }, enabled = input.isNotBlank() && !thinking) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+        if (voicePhase != VoicePhase.OFF) {
+            VoiceBar(voicePhase, voiceLevel, onStop = vm::stopVoice)
+        } else {
+            Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = ::toggleVoice) {
+                    Icon(Icons.Filled.RecordVoiceOver, contentDescription = "Talk hands-free")
+                }
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    placeholder = { Text("Ask about the meeting…") },
+                    modifier = Modifier.weight(1f),
+                    maxLines = 4,
+                )
+                IconButton(onClick = { send(input) }, enabled = input.isNotBlank() && !thinking) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun VoiceBar(phase: VoicePhase, level: Float, onStop: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                when (phase) {
+                    VoicePhase.SPEAKING -> Icons.AutoMirrored.Filled.VolumeUp
+                    VoicePhase.LISTENING -> Icons.Filled.Mic
+                    else -> Icons.Filled.AutoAwesome
+                },
+                contentDescription = null,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when (phase) {
+                        VoicePhase.LISTENING -> "Listening… ask your question"
+                        VoicePhase.TRANSCRIBING -> "Transcribing…"
+                        VoicePhase.THINKING -> "Thinking…"
+                        VoicePhase.SPEAKING -> "Answering…"
+                        VoicePhase.OFF -> ""
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                if (phase == VoicePhase.LISTENING) {
+                    LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                } else if (phase != VoicePhase.SPEAKING) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
+                }
+                Text(
+                    "Hands-free: it listens again after each answer. Stays silent? It stops by itself.",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            FilledTonalButton(onClick = onStop) { Text("Stop") }
         }
     }
 }

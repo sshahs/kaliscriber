@@ -16,25 +16,46 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 **Notes**
 - Type or dictate notes, then have AI tidy them up, summarise them, extract action items, find gaps and questions, suggest a title, or follow your own instruction.
 
+**Listening and talking**
+- Read aloud: the meeting summary, any Ask AI answer, or a note.
+- **Hands-free voice Q&A:** tap the voice button in *Ask AI*, ask your question out loud, and hear the answer. It listens again after each answer and stops when you go quiet.
+- **Audio briefing:** a one-to-two minute spoken catch-up of the meeting, saved as an audio file you can play or share with someone who missed it.
+- Voices: the phone's built-in offline voice, or ElevenLabs.
+
+## Speech-to-text: on-device by default
+
+Transcription runs **on the phone** with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), so audio never leaves the device. Only text goes to the AI model you pick. Download a model once in **Settings → On-device speech**:
+
+| Model | Languages | Download |
+|---|---|---|
+| Parakeet TDT 0.6B v3 (recommended) | 25 European languages incl. English | 465 MB |
+| Parakeet TDT 0.6B v2 | English | 460 MB |
+| Whisper Base / Tiny / Small | 99 languages | 198 / 111 / 610 MB |
+| SenseVoice | Chinese, Cantonese, English, Japanese, Korean | 155 MB |
+
+Silero VAD (1 MB) splits audio into utterances. The optional **speaker detection pack** (pyannote segmentation plus a 3D-Speaker embedding model, 45 MB) tells voices apart on-device when a meeting ends.
+
+You can switch transcription to **ElevenLabs Scribe** (with speaker labels) or any of the cloud options below instead.
+
 ## Supported AI services (BYOK)
 
-| Provider | Chat / insights | Transcription | Speaker labels |
+| Provider | Chat / insights | Transcription | Voice |
 |---|---|---|---|
-| OpenAI | ✓ | ✓ | ✓ with `gpt-4o-transcribe-diarize` |
+| **On-device (sherpa-onnx)** | | ✓ default, with speaker detection | phone voice |
+| **Command Code** | ✓ with **zero data retention** switch | | |
+| **ElevenLabs** | | ✓ Scribe with speaker labels | ✓ |
+| OpenAI | ✓ | ✓ (`gpt-4o-transcribe-diarize` labels speakers) | |
 | Anthropic Claude | ✓ | | |
 | Google Gemini | ✓ (OpenAI-compatible endpoint) | | |
 | **Ollama Cloud** (ollama.com, not local) | ✓ native `/api/chat` with your API key | | |
-| Groq | ✓ | ✓ Whisper | AI separation |
-| OpenRouter | ✓ | | |
-| Mistral | ✓ | ✓ Voxtral | AI separation |
-| DeepSeek | ✓ | | |
-| Deepgram | | ✓ | ✓ |
-| AssemblyAI | | ✓ | ✓ |
-| Custom OpenAI-compatible server | ✓ | ✓ | depends on model |
+| Groq, Mistral | ✓ | ✓ | |
+| OpenRouter, DeepSeek | ✓ | | |
+| Deepgram, AssemblyAI | | ✓ with speaker labels | |
+| Custom OpenAI-compatible server | ✓ | ✓ | |
 
-Pick one service for chat and one for transcription in **Settings**. Every provider's base URL and model are editable, and *List models* fetches what your key can use. Ollama Cloud defaults to `https://ollama.com` with `gpt-oss:120b`. Point the base URL at any remote Ollama server to use that instead.
+**Command Code** uses the Provider API at `https://api.commandcode.ai/provider/v1`, which needs a plan with API access. Claude models go over the Anthropic Messages wire and all other models over Chat Completions. **ZDR is on by default**: every request carries `x-cmd-zdr: 1`, so Command Code only routes to upstreams that retain nothing, and a model without a ZDR route fails with a clear message rather than silently falling back. Turn it off per provider in Settings.
 
-API keys are encrypted with the Android Keystore and are only sent to the provider they belong to. Recordings, transcripts and notes stay on the device (`files/`), and backups are disabled.
+Pick the services for chat, transcription and voice in **Settings**. Every provider's base URL and model are editable. *List models* and *List voices* fetch what your key can use. API keys are encrypted with the Android Keystore and only sent to their own provider. Recordings, transcripts and notes stay on the device, and backups are disabled.
 
 ## How it works
 
@@ -52,7 +73,7 @@ mic ─► AudioRecord (16 kHz PCM) ─┬─► AAC encoder ─► recording.m4
 
 ## Build
 
-Requirements: JDK 17+ and the Android SDK (API 35).
+Requirements: JDK 17+ and the Android SDK (API 35). The first build downloads the sherpa-onnx AAR (50 MB, checksum-verified) into `app/libs/`.
 
 ```bash
 ./gradlew :core:test            # unit tests for the AI/pipeline layer

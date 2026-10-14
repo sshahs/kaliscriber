@@ -175,8 +175,9 @@ fun HomeScreen(
                     item {
                         BannerCard(
                             icon = { Icon(Icons.Filled.Key, null) },
-                            title = "Add your API keys",
-                            body = "KaliScriber uses your own AI accounts (OpenAI, Claude, Gemini, Ollama Cloud, Groq, Deepgram…). Tap to set them up.",
+                            title = "Finish setting up",
+                            body = "Download an on-device speech model for private transcription, and add a key for your AI model " +
+                                "(Command Code, OpenAI, Claude, Gemini, Ollama Cloud…). Tap to open Settings.",
                             onClick = onOpenSettings,
                         )
                     }

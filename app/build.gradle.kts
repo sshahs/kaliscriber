@@ -1,4 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.net.URI
+import java.security.MessageDigest
 
 plugins {
     alias(libs.plugins.android.application)
@@ -14,8 +16,13 @@ android {
         applicationId = "com.kaliscriber.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+
+        ndk {
+            // sherpa-onnx ships native libraries; skip 32-bit x86 to keep the APK smaller.
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -48,8 +55,42 @@ kotlin {
     }
 }
 
+// On-device speech recognition and speaker diarization (https://github.com/k2-fsa/sherpa-onnx).
+// The 50 MB AAR is fetched from the official release once and verified, rather than committed.
+val sherpaOnnxVersion = "1.13.8"
+val sherpaOnnxSha256 = "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96"
+val sherpaOnnxAar = file("libs/sherpa-onnx-$sherpaOnnxVersion.aar")
+
+fun sha256(file: File): String = MessageDigest.getInstance("SHA-256").let { digest ->
+    file.inputStream().use { input ->
+        val buffer = ByteArray(1 shl 16)
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) break
+            digest.update(buffer, 0, n)
+        }
+    }
+    digest.digest().joinToString("") { "%02x".format(it) }
+}
+
+if (!sherpaOnnxAar.exists()) {
+    sherpaOnnxAar.parentFile.mkdirs()
+    val part = File(sherpaOnnxAar.parentFile, sherpaOnnxAar.name + ".part")
+    val url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaOnnxVersion/sherpa-onnx-$sherpaOnnxVersion.aar"
+    logger.lifecycle("Downloading $url")
+    URI(url).toURL().openStream().use { input -> part.outputStream().use { input.copyTo(it) } }
+    val actual = sha256(part)
+    check(actual == sherpaOnnxSha256) {
+        part.delete()
+        "sherpa-onnx AAR checksum mismatch: expected $sherpaOnnxSha256 but was $actual"
+    }
+    check(part.renameTo(sherpaOnnxAar)) { "Could not move ${part.name} into place" }
+}
+
 dependencies {
     implementation(project(":core"))
+    implementation(files(sherpaOnnxAar))
+    implementation(libs.commons.compress)
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.core.ktx)

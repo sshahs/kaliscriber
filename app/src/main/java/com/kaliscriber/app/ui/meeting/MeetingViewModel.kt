@@ -4,6 +4,7 @@ import android.media.MediaPlayer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
+import com.kaliscriber.app.speech.VoiceRecorder
 import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.transcript.TranscriptFormatter
@@ -20,8 +21,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 
-enum class Busy { INSIGHTS, GAPS, ASK, SPEAKERS, NAMES, RETRY }
+enum class Busy { INSIGHTS, GAPS, ASK, SPEAKERS, NAMES, RETRY, BRIEFING }
+
+/** Where the hands-free voice conversation is. */
+enum class VoicePhase { OFF, LISTENING, TRANSCRIBING, THINKING, SPEAKING }
 
 class MeetingViewModel(private val container: AppContainer, val meetingId: String) : ViewModel() {
 
@@ -44,6 +49,17 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     val excerpt = MutableStateFlow<ExcerptRef?>(null)
 
     val player = AudioPlayer(viewModelScope)
+
+    private val speech = container.speech
+
+    /** Key of whatever is being read aloud right now (a message id, "summary", "briefing", ...). */
+    val speaking: StateFlow<String?> = speech.speaking
+
+    private val voice = VoiceRecorder(container.appContext)
+    val voiceLevel: StateFlow<Float> = voice.level
+    private val _voicePhase = MutableStateFlow(VoicePhase.OFF)
+    val voicePhase: StateFlow<VoicePhase> = _voicePhase.asStateFlow()
+    private var voiceJob: Job? = null
 
     private fun launchTask(kind: Busy, success: String? = null, block: suspend () -> Unit) {
         if (kind in _busy.value) return
@@ -79,6 +95,116 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     }
 
     fun clearChat() = viewModelScope.launch { repo.clearChat(meetingId) }
+
+    // --- Reading aloud --------------------------------------------------------------------------
+
+    fun speak(key: String, text: String) {
+        player.pause()
+        viewModelScope.launch {
+            try {
+                speech.speak(key, text)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _messages.send(e.message ?: "Could not read aloud")
+            }
+        }
+    }
+
+    fun stopSpeaking() = speech.stop()
+
+    /** The summary, decisions and action items as one text to read aloud. */
+    fun summaryForSpeech(): String {
+        val m = meeting.value ?: return ""
+        val insights = m.insights ?: return ""
+        return buildString {
+            appendLine("${m.title}.")
+            appendLine(insights.summary)
+            if (insights.decisions.isNotEmpty()) {
+                appendLine("Decisions:")
+                insights.decisions.forEach { appendLine("- $it") }
+            }
+            val open = insights.actionItems.filter { !it.done }
+            if (open.isNotEmpty()) {
+                appendLine("Action items:")
+                open.forEach { item ->
+                    appendLine("- ${item.task}" + (item.owner?.let { ", owner $it" } ?: "") + (item.dueDate?.let { ", due $it" } ?: ""))
+                }
+            }
+        }
+    }
+
+    /** Writes a spoken recap with the AI model and renders it to audio with the selected voice. */
+    fun createBriefing() = launchTask(Busy.BRIEFING, "Audio briefing ready") {
+        val script = meeting.value?.briefing?.script?.takeIf { meeting.value?.briefing?.audioPath == null }
+            ?: pipeline.generateBriefingScript(meetingId)
+        val file = speech.renderToFile(script, repo.audioDir(meetingId))
+        pipeline.setBriefingAudio(meetingId, file.absolutePath)
+    }
+
+    fun regenerateBriefing() = launchTask(Busy.BRIEFING, "Audio briefing updated") {
+        val script = pipeline.generateBriefingScript(meetingId)
+        val file = speech.renderToFile(script, repo.audioDir(meetingId))
+        pipeline.setBriefingAudio(meetingId, file.absolutePath)
+    }
+
+    fun playBriefing() {
+        val path = meeting.value?.briefing?.audioPath ?: return
+        player.pause()
+        viewModelScope.launch {
+            runCatching { speech.playFile(BRIEFING_KEY, File(path)) }
+                .onFailure { if (it !is kotlinx.coroutines.CancellationException) _messages.send(it.message ?: "Could not play") }
+        }
+    }
+
+    // --- Hands-free voice Q&A -------------------------------------------------------------------
+
+    /** Listen → transcribe → ask → speak the answer, then listen again until stopped or silent. */
+    fun startVoice() {
+        if (voiceJob?.isActive == true) return
+        player.pause()
+        speech.stop()
+        voiceJob = viewModelScope.launch {
+            var silentTurns = 0
+            try {
+                while (isActive) {
+                    _voicePhase.value = VoicePhase.LISTENING
+                    val file = voice.recordUtterance()
+                    if (file == null) {
+                        silentTurns++
+                        if (silentTurns >= 2) break
+                        continue
+                    }
+                    silentTurns = 0
+                    _voicePhase.value = VoicePhase.TRANSCRIBING
+                    val question = try {
+                        val language = container.settings().transcriptionLanguage.ifBlank { null }
+                        container.ai.stt().transcribe(file, language).segments.joinToString(" ") { it.text }.trim()
+                    } finally {
+                        file.delete()
+                    }
+                    if (question.isBlank()) continue
+                    _voicePhase.value = VoicePhase.THINKING
+                    val answer = pipeline.ask(meetingId, question, excerpt = null, spoken = true).getOrNull() ?: break
+                    _voicePhase.value = VoicePhase.SPEAKING
+                    speech.speak(VOICE_KEY, answer)
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _messages.send(e.message ?: "Voice conversation stopped")
+            } finally {
+                voice.cancel()
+                _voicePhase.value = VoicePhase.OFF
+            }
+        }
+    }
+
+    fun stopVoice() {
+        voiceJob?.cancel()
+        voiceJob = null
+        voice.cancel()
+        speech.stop()
+        _voicePhase.value = VoicePhase.OFF
+    }
 
     fun askAboutSelection() {
         val m = meeting.value ?: return
@@ -127,7 +253,14 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     fun markdown(): String = meeting.value?.let(TranscriptFormatter::markdown).orEmpty()
 
     override fun onCleared() {
+        stopVoice()
         player.release()
+    }
+
+    companion object {
+        const val BRIEFING_KEY = "briefing"
+        const val SUMMARY_KEY = "summary"
+        const val VOICE_KEY = "voice"
     }
 }
 
@@ -158,6 +291,14 @@ class AudioPlayer(private val scope: CoroutineScope) {
             player = mp
             path = newPath
             _duration.value = mp.duration.toLong()
+        }
+    }
+
+    fun pause() {
+        val mp = player ?: return
+        if (mp.isPlaying) {
+            mp.pause()
+            _playing.value = false
         }
     }
 

@@ -33,3 +33,6 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Downloaded at build time (see app/build.gradle.kts)
+app/libs/

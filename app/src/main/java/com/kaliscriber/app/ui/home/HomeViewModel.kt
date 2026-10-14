@@ -7,6 +7,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
 import com.kaliscriber.app.recording.RecordingState
+import com.kaliscriber.app.speech.ModelCatalog
+import com.kaliscriber.app.speech.ModelState
+import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
@@ -40,8 +43,16 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     val recording: StateFlow<RecordingState> = container.recorder.state
 
     /** True when the selected chat or transcription provider still needs an API key. */
-    val needsSetup: StateFlow<Boolean> = combine(container.settingsStore.value, container.secrets.configured) { s, keys ->
-        (s.chatProvider.keyRequired && s.chatProvider !in keys) || (s.sttProvider.keyRequired && s.sttProvider !in keys)
+    val needsSetup: StateFlow<Boolean> = combine(
+        container.settingsStore.value,
+        container.secrets.configured,
+        container.models.states,
+    ) { s, keys, models ->
+        val localModelMissing = s.sttProvider == ProviderId.LOCAL &&
+            ModelCatalog.asrModels.none { models[it.id] is ModelState.Ready }
+        (s.chatProvider.keyRequired && s.chatProvider !in keys) ||
+            (s.sttProvider.keyRequired && s.sttProvider !in keys) ||
+            localModelMissing
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     suspend fun startRecording(title: String?): Result<String> = runCatching { container.recorder.start(title) }

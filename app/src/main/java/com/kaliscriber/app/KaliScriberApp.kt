@@ -6,6 +6,9 @@ import android.app.NotificationManager
 import android.content.Context
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.app.recording.RecordingManager
+import com.kaliscriber.app.speech.LocalSpeechEngine
+import com.kaliscriber.app.speech.ModelManager
+import com.kaliscriber.app.speech.SpeechOutput
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.DefaultAiServices
 import com.kaliscriber.core.ai.MeetingAi
@@ -59,8 +62,14 @@ class AppContainer(context: Context) {
 
     val secrets = SecretStore(appContext)
     val http = defaultHttpClient()
-    val ai = DefaultAiServices(settings, secrets, http)
+
+    /** On-device speech models and the sherpa-onnx engine that uses them. */
+    val models = ModelManager(appContext, http, scope)
+    val localSpeech = LocalSpeechEngine(models, settings)
+
+    val ai = DefaultAiServices(settings, secrets, http, localStt = { localSpeech })
     val meetingAi = MeetingAi(ai, settings)
+    val speech = SpeechOutput(appContext, ai, settings)
 
     val meetings = MeetingRepository(
         JsonDocumentStore(File(filesDir, "meetings"), Meeting.serializer()) { it.id },

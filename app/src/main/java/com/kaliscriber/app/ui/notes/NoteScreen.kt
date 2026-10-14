@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
@@ -66,6 +67,7 @@ fun NoteScreen(noteId: String, onBack: () -> Unit) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val result by vm.result.collectAsStateWithLifecycle()
     val dictating by vm.dictating.collectAsStateWithLifecycle()
+    val speaking by vm.speaking.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -111,6 +113,13 @@ fun NoteScreen(noteId: String, onBack: () -> Unit) {
                             aiMenu = false
                             customPrompt = ""
                         })
+                    }
+                    IconButton(onClick = vm::toggleReadAloud) {
+                        val reading = speaking == "note-$noteId"
+                        Icon(
+                            if (reading) Icons.Filled.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = if (reading) "Stop reading" else "Read aloud",
+                        )
                     }
                     IconButton(onClick = { shareText(context, title.ifBlank { "Note" }, "# ${title}\n\n$content") }) {
                         Icon(Icons.Filled.Share, contentDescription = "Share")
