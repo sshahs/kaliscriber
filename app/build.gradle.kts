@@ -16,8 +16,8 @@ android {
         applicationId = "com.kaliscriber.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.5.0"
+        versionCode = 14
+        versionName = "0.6.0"
 
     }
 

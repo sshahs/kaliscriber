@@ -2,11 +2,16 @@ package com.kaliscriber.app.ui
 
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.kaliscriber.app.LaunchRequest
+import com.kaliscriber.app.appContainer
 import com.kaliscriber.app.ui.ask.AskAllScreen
 import com.kaliscriber.app.ui.home.HomeScreen
 import com.kaliscriber.app.ui.meeting.MeetingScreen
@@ -34,6 +39,19 @@ object Routes {
 @Composable
 fun AppNavigation(openTasks: Boolean = false) {
     val nav = rememberNavController()
+    val launches = appContainer().launches
+    val request by launches.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(request) {
+        when (val r = request) {
+            is LaunchRequest.OpenMeeting -> {
+                launches.consume(r)
+                nav.navigate(Routes.meeting(r.id)) { popUpTo(Routes.HOME) }
+            }
+            // Home starts the recording (it asks for the microphone permission if needed).
+            LaunchRequest.Record -> if (nav.currentDestination?.route != Routes.HOME) nav.popBackStack(Routes.HOME, inclusive = false)
+            null -> Unit
+        }
+    }
     NavHost(navController = nav, startDestination = Routes.HOME) {
         composable(Routes.HOME) {
             HomeScreen(

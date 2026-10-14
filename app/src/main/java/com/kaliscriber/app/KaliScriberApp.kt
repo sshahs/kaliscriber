@@ -9,8 +9,12 @@ import android.util.Log
 import com.kaliscriber.app.calendar.CalendarService
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.app.export.MeetingExporter
+import com.kaliscriber.app.importing.AudioImporter
 import com.kaliscriber.app.processing.MeetingJobs
 import com.kaliscriber.app.recording.RecordingManager
+import com.kaliscriber.app.recording.RecordingState
+import com.kaliscriber.app.shortcuts.RecordTileService
+import com.kaliscriber.app.shortcuts.RecordWidget
 import com.kaliscriber.app.speech.LocalSpeechEngine
 import com.kaliscriber.app.speech.ModelCatalog
 import com.kaliscriber.app.speech.ModelManager
@@ -39,6 +43,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -110,6 +115,10 @@ class AppContainer(context: Context) {
     val exporter = MeetingExporter(appContext, http, secrets, settings)
     /** Long jobs started from a meeting screen, kept running in the background. */
     val jobs = MeetingJobs(appContext, scope)
+    /** Audio and video files picked in the app, shared to it or opened with it. */
+    val importer = AudioImporter(appContext, meetings, pipeline, jobs, scope)
+    /** What the app was opened to do from outside (a shared file, the tile or the widget). */
+    val launches = LaunchRequests()
     /** "Ask across all meetings" and its conversation. */
     val libraryAsk = LibraryAsk(
         meetings,
@@ -134,6 +143,15 @@ class AppContainer(context: Context) {
         // Speech models downloaded before the speaker pack came bundled with them: fetch it on Wi-Fi.
         val metered = runCatching { appContext.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered }.getOrDefault(true)
         if (speakerPackMissing && models.readyAsrModels().isNotEmpty() && !metered) models.downloadDiarization()
+        // The Quick Settings tile and home-screen widget show whether a meeting is being recorded.
+        scope.launch {
+            recorder.state
+                .distinctUntilChangedBy { s -> s.javaClass.name + ((s as? RecordingState.Recording)?.paused ?: "") }
+                .collect { state ->
+                    RecordTileService.refresh(appContext)
+                    runCatching { RecordWidget.update(appContext, state) }
+                }
+        }
         // Keep the daily action-item reminder in step with its settings.
         scope.launch {
             settingsStore.value

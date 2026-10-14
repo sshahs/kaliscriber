@@ -1,8 +1,6 @@
 package com.kaliscriber.app.ui.home
 
-import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
@@ -12,7 +10,6 @@ import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.calendar.MeetingPrep
 import com.kaliscriber.core.model.Meeting
-import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
 import com.kaliscriber.core.search.MeetingSearch
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +25,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 class HomeViewModel(private val container: AppContainer) : ViewModel() {
 
@@ -87,32 +83,5 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     fun deleteNote(id: String) = viewModelScope.launch { container.notes.delete(id) }
 
     /** Copies the picked audio into app storage and transcribes it in the background. */
-    suspend fun importAudio(uri: Uri): Result<String> = runCatching {
-        val resolver = container.appContext.contentResolver
-        val name = withContext(Dispatchers.IO) {
-            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                if (c.moveToFirst()) c.getString(0) else null
-            }
-        } ?: "Imported audio"
-        val meeting = container.meetings.create(name.substringBeforeLast('.'), status = MeetingStatus.TRANSCRIBING)
-        val extension = name.substringAfterLast('.', "m4a").lowercase().take(5)
-        val target = File(container.meetings.audioDir(meeting.id), "imported.$extension")
-        val durationMs = withContext(Dispatchers.IO) {
-            resolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
-                ?: error("Could not read the selected file")
-            runCatching {
-                MediaMetadataRetriever().run {
-                    try {
-                        setDataSource(target.absolutePath)
-                        extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-                    } finally {
-                        release()
-                    }
-                }
-            }.getOrNull()
-        }
-        if (durationMs != null) container.meetings.update(meeting.id) { it.copy(durationMs = durationMs) }
-        container.scope.launch { container.pipeline.processImportedAudio(meeting.id, target, durationMs) }
-        meeting.id
-    }
+    suspend fun importAudio(uri: Uri): Result<String> = runCatching { container.importer.import(uri) }
 }

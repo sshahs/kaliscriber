@@ -9,7 +9,7 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - **Speaker detection.** When the app can't tell who is speaking, it gives that speaker a **random placeholder name** (e.g. *Amber Falcon*). You can rename speakers at any time, accept AI name suggestions ("AI thinks this is Priya, who introduced herself at 00:12"), merge two speakers, or move selected lines to another or a new speaker.
 - When recording stops, the whole meeting is re-transcribed with a speaker-aware model (if your provider has one) for consistent speakers. If it doesn't, the AI model separates speakers from the text.
 - **Insights:** summary, action items (with owner, due date and priority, which you can tick off), key points, decisions, highlights (tap to play that moment), topics, risks, next steps and tone.
-- **Ask AI** about the meeting, or about a part of it: long-press lines in the transcript, then tap *Ask AI*. Answers cite timestamps.
+- **Ask AI** about the meeting, or about a part of it: long-press lines in the transcript, then tap *Ask AI*. Answers cite timestamps and appear as the AI writes them.
 - **Search all meetings:** the search box on the home screen looks through titles, people, summaries, action items and every transcript line, with word forms matched ("price" finds "pricing"). Tap a result to open the transcript at that line.
 - **Ask all meetings:** ask a question about everything you've recorded ("What did we decide about pricing last month?"). The app finds the relevant meetings and passages, the AI answers from them, and each answer lists its sources. Tap a source to jump to that moment.
 - **Tasks:** every action item from every meeting in one list, grouped into overdue, due today, next 7 days, later and no date. Filter by person, tick items off, or edit the task, owner and due date. Edits and ticks are kept when a summary is regenerated. An optional daily reminder (Settings → Action item reminders) lists what's overdue or due that day.
@@ -17,6 +17,10 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - **Glossary:** names, products and jargon that speech recognition gets wrong (Settings → Glossary, one per line). The AI spells them correctly in summaries and answers, and after each meeting it fixes misheard versions in the transcript (also available from a meeting's menu).
 - **Gaps & questions:** the AI finds what's missing (tasks without owners or deadlines, vague references, unanswered questions…) and asks *you* questions. Your answers are stored with the meeting and fed back into the summary and Ask AI.
 - Play the recording with the transcript following along, edit lines, import existing audio files, share as Markdown, or save as a note.
+- **Share to KaliScriber:** share a recording, voice note or video from another app (or open an audio file with KaliScriber) and it becomes a meeting, transcribed and summarised in the background.
+- **Meeting prep:** with a CalDAV calendar set up, Home shows the meeting in progress or coming up next, who is invited, what is still open with them and your last meeting with them, plus *Prepare* and *Record* buttons.
+- **Processing details** (meeting menu): each processing step with how long it took, and how long the meeting took to be ready after recording stopped.
+- **Quick Settings tile and home-screen widget** to start recording in one tap.
 
 **Speakers**
 - **Voice memory:** name a speaker once and the app recognises their voice in later meetings. Voiceprints are computed and stored only on the phone (Settings → Voice memory).
@@ -24,6 +28,9 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 
 **During a meeting**
 - *Ask AI about the meeting so far* from the recording screen, e.g. "Catch me up on the last five minutes" or "What should I clarify right now?". Recording continues in the background.
+- **Speakers named as you go:** every ten minutes the live transcript is labelled with who is speaking, and saved voices are named straight away. Names you give during the meeting are kept.
+- **Bookmarks:** tap *Mark* (or *Bookmark* in the notification) when something important is said, optionally with a note. Marked moments get extra weight in the notes and summary.
+- **Calendar:** a recording started during an event in your CalDAV calendar takes its title and number of invitees, and the invitees' names help the AI name speakers.
 
 **Export** (the share icon on a meeting)
 - **Email:** the notes as plain text to your default recipients.
@@ -52,7 +59,7 @@ Transcription runs **on the phone** with [sherpa-onnx](https://github.com/k2-fsa
 | Whisper Base / Tiny / Small | 99 languages | 198 / 111 / 610 MB |
 | SenseVoice | Chinese, Cantonese, English, Japanese, Korean | 155 MB |
 
-Silero VAD (1 MB) splits audio into utterances. The **speaker detection pack** (pyannote segmentation plus a 3D-Speaker embedding model, 45 MB) tells voices apart on-device when a meeting ends. It downloads together with a speech model, or on demand when a meeting ends without it. Recordings are processed in 10-minute blocks; every speaker found gets a voiceprint, and voiceprints are merged across the meeting, which matches people between blocks and rejoins one person the diarizer split in two. Lines are split at the word where the speaker changes. Speaker detection and other long jobs run under a foreground service, so they finish with the app in the background.
+Silero VAD (1 MB) splits audio into utterances. The **speaker detection pack** (pyannote segmentation plus the NeMo TitaNet small speaker embedding model, 47 MB) tells voices apart on-device. It downloads together with a speech model, or on demand when a meeting ends without it. Recordings are processed in 10-minute blocks; every speaker found gets a voiceprint, and voiceprints are merged across the meeting, which matches people between blocks and rejoins one person the diarizer split in two. Lines are split at the word where the speaker changes. Speaker detection and other long jobs run under a foreground service, so they finish with the app in the background.
 
 You can switch transcription to **ElevenLabs Scribe** (with speaker labels) or any of the cloud options below instead.
 
@@ -60,7 +67,8 @@ You can switch transcription to **ElevenLabs Scribe** (with speaker labels) or a
 
 Most of the work happens while you are still recording, so results arrive soon after you stop:
 
-- **Speaker detection during the meeting.** Each ten minutes of audio is diarized on the phone as soon as it is recorded; when you stop, only the last stretch is left, and the blocks are joined by voiceprint.
+- **Speaker detection during the meeting.** Each ten minutes of audio is diarized on the phone as soon as it is recorded; when you stop, only the last stretch is left, and the blocks are joined by voiceprint. TitaNet small computes voiceprints about a third faster than the ERes2Net model used before, with the same accuracy on our tests.
+- **Streaming answers.** Ask and Ask all meetings show answers as they are written.
 - **Running notes.** Every ten minutes the AI writes short notes on what was said. The summary of a long meeting starts from those notes plus the last few minutes of transcript, so it is ready much sooner. (Regenerating the summary later reads the full transcript.)
 - **Prompt caching.** Every request about a meeting starts with the same text (rules, glossary, meeting), with the task last, so providers that cache prompts (DeepSeek, OpenAI, Gemini, and Claude with explicit cache markers) answer follow-up requests faster and cheaper.
 - **Light storage.** Progress updates stay in memory instead of rewriting the meeting file, files leave out default values and store word timings compactly, and meetings load in parallel at startup.

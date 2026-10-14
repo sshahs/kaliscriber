@@ -56,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +71,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kaliscriber.app.LaunchRequest
+import com.kaliscriber.app.appContainer
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.app.ui.common.EmptyState
@@ -132,6 +135,16 @@ fun HomeScreen(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
         }.filter { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }
         if (needed.isEmpty()) startRecording() else permissions.launch(needed.toTypedArray())
+    }
+
+    // The Quick Settings tile and the widget open the app to start recording.
+    val launches = appContainer().launches
+    val launchRequest by launches.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(launchRequest) {
+        if (launchRequest == LaunchRequest.Record) {
+            launches.consume(LaunchRequest.Record)
+            requestRecording()
+        }
     }
 
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->

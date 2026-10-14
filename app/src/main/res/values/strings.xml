@@ -1,4 +1,8 @@
 <resources>
     <string name="app_name">KaliScriber</string>
     <string name="recording_channel">Meeting recording</string>
+    <string name="widget_record">Record meeting</string>
+    <string name="widget_description">Start recording a meeting with one tap</string>
+    <string name="tile_label">Record meeting</string>
+    <string name="share_label">Transcribe with KaliScriber</string>
 </resources>

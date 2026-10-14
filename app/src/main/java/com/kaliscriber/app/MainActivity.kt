@@ -1,6 +1,11 @@
 package com.kaliscriber.app
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Parcelable
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,17 +18,91 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.kaliscriber.app.tasks.TaskReminders
 import com.kaliscriber.app.ui.AppNavigation
 import com.kaliscriber.app.ui.theme.KaliScriberTheme
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    private val container: AppContainer get() = (application as KaliScriberApp).container
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val openTasks = intent?.getBooleanExtra(TaskReminders.EXTRA_OPEN_TASKS, false) == true
+        // A recreated activity has already handled the intent it was started with.
+        if (savedInstanceState == null) handle(intent)
         setContent {
             KaliScriberTheme {
                 AppNavigation(openTasks = openTasks)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handle(intent)
+    }
+
+    /** Files shared to or opened with the app become meetings; the tile and widget start recording. */
+    private fun handle(intent: Intent?) {
+        intent ?: return
+        if (intent.action == ACTION_RECORD || intent.getBooleanExtra(EXTRA_RECORD, false)) {
+            container.launches.post(LaunchRequest.Record)
+            return
+        }
+        val uris = when (intent.action) {
+            Intent.ACTION_SEND -> listOfNotNull(intent.stream())
+            Intent.ACTION_SEND_MULTIPLE -> intent.streams()
+            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+            else -> emptyList()
+        }
+        if (uris.isEmpty()) return
+        Toast.makeText(this, if (uris.size == 1) "Importing into KaliScriber…" else "Importing ${uris.size} files…", Toast.LENGTH_SHORT).show()
+        // The app's scope keeps the copy going if the screen rotates; the grant to read lasts as long as this task.
+        container.scope.launch {
+            var last: String? = null
+            for (uri in uris) {
+                try {
+                    last = container.importer.import(uri)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "Couldn't import: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            last?.let { container.launches.post(LaunchRequest.OpenMeeting(it)) }
+        }
+    }
+
+    private fun Intent.stream(): Uri? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            getParcelableExtra<Parcelable>(Intent.EXTRA_STREAM) as? Uri
+        }
+
+    private fun Intent.streams(): List<Uri> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+        } else {
+            @Suppress("DEPRECATION")
+            getParcelableArrayListExtra<Parcelable>(Intent.EXTRA_STREAM).orEmpty().filterIsInstance<Uri>()
+        }
+
+    companion object {
+        /** Opens the app and starts recording (Quick Settings tile, widget). */
+        const val ACTION_RECORD = "com.kaliscriber.app.action.RECORD"
+        const val EXTRA_RECORD = "com.kaliscriber.app.extra.RECORD"
+
+        fun recordIntent(context: android.content.Context): Intent =
+            Intent(context, MainActivity::class.java)
+                .setAction(ACTION_RECORD)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 }
 
