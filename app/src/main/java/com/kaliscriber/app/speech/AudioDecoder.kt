@@ -170,15 +170,19 @@ object AudioDecoder {
                     }
                     outIndex >= 0 -> {
                         val out = codec.getOutputBuffer(outIndex)
-                        if (out != null && info.size > 0) {
+                        val mono = if (out != null && info.size > 0) {
                             out.position(info.offset)
                             out.limit(info.offset + info.size)
                             val pcm = out.slice().order(ByteOrder.nativeOrder())
-                            val mono = if (floatPcm) floatToMono(pcm, info.size, channels) else pcm16ToMono(pcm, info.size, channels)
-                            resampler.process(mono)?.let(onSamples)
+                            if (floatPcm) floatToMono(pcm, info.size, channels) else pcm16ToMono(pcm, info.size, channels)
+                        } else {
+                            null
                         }
+                        val endOfStream = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                        // Hand the buffer back before the callback, which may run for minutes (speaker detection).
                         codec.releaseOutputBuffer(outIndex, false)
-                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                        mono?.let { resampler.process(it)?.let(onSamples) }
+                        if (endOfStream) break
                     }
                 }
             }

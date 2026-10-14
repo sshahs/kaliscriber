@@ -5,57 +5,45 @@ import kotlin.math.sqrt
 /**
  * Joins the speakers found in separate blocks of a long recording into one set of speakers by
  * comparing their voiceprints. Long meetings are diarized in blocks to keep memory bounded, and
- * each block numbers its speakers independently.
+ * each block numbers its speakers independently. The diarizer also tends to split one person into
+ * several clusters within a block, which this merges back together.
  */
 object SpeakerClusters {
 
-    /** One speaker found in block [group], with its voiceprint and how much they spoke (seconds). */
-    class Item(val group: Int, val embedding: FloatArray, val weight: Double = 1.0)
+    /** One speaker found by the diarizer, with their voiceprint and how much they spoke (seconds). */
+    class Item(val embedding: FloatArray, val weight: Double = 1.0)
 
     /**
      * Returns the global speaker number for each item, numbered in order of first appearance.
      *
      * The closest pair of speakers is merged while their voices are at least [minSimilarity] alike
-     * (cosine). Speakers from the same block are never merged that way, since the block already told
-     * them apart. With [target] speakers, merging continues until no more than [target] remain.
+     * (cosine of the speaking-time weighted voiceprints). With [target] speakers, merging continues
+     * until no more than [target] remain.
      */
     fun merge(items: List<Item>, target: Int? = null, minSimilarity: Double = 0.5): IntArray {
         if (items.isEmpty()) return IntArray(0)
         val members = items.indices.map { mutableListOf(it) }.toMutableList()
-        val groups = items.map { mutableSetOf(it.group) }.toMutableList()
         val sums = items.map { item -> normalized(item.embedding).map { it * item.weight.coerceAtLeast(0.1) }.toDoubleArray() }
             .toMutableList()
 
         while (members.size > 1) {
             var best: Pair<Int, Int>? = null
             var bestSim = Double.NEGATIVE_INFINITY
-            var bestAny: Pair<Int, Int>? = null
-            var bestAnySim = Double.NEGATIVE_INFINITY
             for (a in members.indices) {
                 for (b in a + 1 until members.size) {
                     val sim = cosine(sums[a], sums[b])
-                    if (sim > bestAnySim) {
-                        bestAnySim = sim
-                        bestAny = a to b
-                    }
-                    if (groups[a].none { it in groups[b] } && sim > bestSim) {
+                    if (sim > bestSim) {
                         bestSim = sim
                         best = a to b
                     }
                 }
             }
             val tooMany = target != null && members.size > target
-            val pair = when {
-                best != null && bestSim >= minSimilarity -> best
-                tooMany -> best ?: bestAny
-                else -> null
-            } ?: break
-            val (a, b) = pair
+            if (best == null || (bestSim < minSimilarity && !tooMany)) break
+            val (a, b) = best
             members[a].addAll(members[b])
-            groups[a].addAll(groups[b])
             for (k in sums[a].indices) sums[a][k] += sums[b][k]
             members.removeAt(b)
-            groups.removeAt(b)
             sums.removeAt(b)
         }
 

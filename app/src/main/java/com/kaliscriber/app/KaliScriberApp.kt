@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.util.Log
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.app.export.MeetingExporter
+import com.kaliscriber.app.processing.MeetingJobs
 import com.kaliscriber.app.recording.RecordingManager
 import com.kaliscriber.app.speech.LocalSpeechEngine
 import com.kaliscriber.app.speech.ModelManager
@@ -95,6 +96,8 @@ class AppContainer(context: Context) {
         fetchDiarizationModels = { onProgress -> models.awaitDiarization(onProgress) },
     )
     val exporter = MeetingExporter(appContext, http, secrets, settings)
+    /** Long jobs started from a meeting screen, kept running in the background. */
+    val jobs = MeetingJobs(appContext, scope)
     val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope, onStart = {
         // Start fetching speaker detection now so it is ready when the meeting ends.
         if (speakerPackMissing) models.downloadDiarization()

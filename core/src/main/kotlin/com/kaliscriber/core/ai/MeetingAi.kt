@@ -22,6 +22,7 @@ import com.kaliscriber.core.transcript.TranscriptFormatter
 import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -60,9 +61,9 @@ class MeetingAi(
     private fun transcriptFor(meeting: Meeting): String =
         TranscriptFormatter.truncateMiddle(TranscriptFormatter.forPrompt(meeting), settings().maxTranscriptChars)
 
-    private suspend fun json(system: String, user: String): JsonObject {
+    private suspend fun json(system: String, user: String, outputLimit: Int? = null): JsonObject {
         val text = ai.chat().complete(
-            LlmRequest(system = system, messages = listOf(LlmMessage(LlmRole.USER, user)), jsonMode = true),
+            LlmRequest(system = system, messages = listOf(LlmMessage(LlmRole.USER, user)), jsonMode = true, outputLimit = outputLimit),
         )
         return LlmJson.parseObject(text)
     }
@@ -188,12 +189,14 @@ class MeetingAi(
     /**
      * Uses the LLM to split an unlabelled transcript into speaker turns. Returns new speakers and
      * segments; existing named (non-placeholder) speakers are kept. Long transcripts go in parts;
-     * a part that fails twice keeps its lines unassigned instead of losing the whole meeting.
+     * a part that fails twice, or takes longer than [partTimeoutMs], keeps its lines unassigned
+     * instead of holding up or losing the whole meeting.
      */
     suspend fun separateSpeakers(
         meeting: Meeting,
         windowChars: Int = 6_000,
-        onProgress: suspend (Float) -> Unit = {},
+        partTimeoutMs: Long = SEPARATION_PART_TIMEOUT_MS,
+        onPart: suspend (part: Int, parts: Int) -> Unit = { _, _ -> },
     ): Separation {
         requireTranscript(meeting)
         val keptSpeakers = meeting.speakers.filter { !it.isPlaceholder && meeting.segments.any { s -> s.speakerId == it.id } }
@@ -202,10 +205,10 @@ class MeetingAi(
         val labelToSpeaker = mutableMapOf<String, Speaker>()
         val parts = windows(meeting.segments, windowChars)
         var failed = 0
-        var lastError: Exception? = null
+        var lastError: String? = null
 
         for ((partIndex, window) in parts.withIndex()) {
-            onProgress(partIndex.toFloat() / parts.size)
+            onPart(partIndex, parts.size)
             val user = buildString {
                 if (labelToSpeaker.isNotEmpty()) {
                     appendLine("Speakers established so far, with a recent line from each:")
@@ -219,21 +222,24 @@ class MeetingAi(
                 appendLine("Segments:")
                 window.forEachIndexed { i, seg -> appendLine("$i| ${seg.text.replace('\n', ' ')}") }
             }
-            val obj = try {
-                json(Prompts.SEPARATE_SPEAKERS_SYSTEM, user)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
+            // The compact reply needs far less than this, even with some thinking; the cap stops a
+            // model that starts repeating itself from running for many minutes.
+            val outputLimit = SEPARATION_OUTPUT_LIMIT
+            var obj: JsonObject? = null
+            for (attempt in 1..2) {
                 try {
-                    json(Prompts.SEPARATE_SPEAKERS_SYSTEM, user)
-                } catch (e2: CancellationException) {
-                    throw e2
-                } catch (e2: Exception) {
-                    failed++
-                    lastError = e2
-                    null
+                    obj = withTimeoutOrNull(partTimeoutMs) { json(Prompts.SEPARATE_SPEAKERS_SYSTEM, user, outputLimit) }
+                    if (obj != null) break
+                    // A part that timed out is not retried: it would most likely time out again.
+                    lastError = "the AI took longer than ${partTimeoutMs / 60_000} minutes"
+                    break
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastError = e.message ?: e.javaClass.simpleName
                 }
             }
+            if (obj == null) failed++
             val turns = obj?.list("turns", "assignments").orEmpty().mapNotNull { el ->
                 val t = el as? JsonObject ?: return@mapNotNull null
                 val index = (t["i"] as? JsonPrimitive)?.intOrNull ?: (t["index"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
@@ -255,14 +261,14 @@ class MeetingAi(
                 }
             }
         }
-        onProgress(1f)
-        if (failed == parts.size) throw lastError ?: AiException("The AI could not separate the speakers.")
+        onPart(parts.size, parts.size)
+        if (failed == parts.size) throw AiException("The AI could not separate the speakers: ${lastError ?: "no reason given"}")
         val used = out.mapNotNull { it.speakerId }.toSet()
         return Separation(
             SpeakerAssigner.Result(speakers.filter { it.id in used }, out),
             parts = parts.size,
             failedParts = failed,
-            error = lastError?.message,
+            error = lastError,
         )
     }
 
@@ -342,3 +348,7 @@ class MeetingAi(
         if (meeting.segments.isEmpty()) throw AiException("There is no transcript yet.")
     }
 }
+
+/** How long one part of AI speaker separation may take before it is skipped. */
+internal const val SEPARATION_PART_TIMEOUT_MS = 5 * 60_000L
+private const val SEPARATION_OUTPUT_LIMIT = 16_000

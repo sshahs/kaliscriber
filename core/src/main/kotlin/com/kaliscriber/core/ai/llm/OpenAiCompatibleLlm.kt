@@ -55,6 +55,8 @@ class OpenAiCompatibleLlm(
                 putJsonObject("response_format") { put("type", "json_object") }
             }
             if (effort != null) put("reasoning_effort", effort)
+            // OpenAI's own API only takes the newer name; compatible providers know max_tokens.
+            request.outputLimit?.let { put(if (config.id == ProviderId.OPENAI) "max_completion_tokens" else "max_tokens", it) }
         }
         val req = Request.Builder()
             .url("${config.baseUrl}/chat/completions")

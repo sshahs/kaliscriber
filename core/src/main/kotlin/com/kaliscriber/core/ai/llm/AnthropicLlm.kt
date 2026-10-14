@@ -25,7 +25,7 @@ class AnthropicLlm(
         if (config.chatModel.isBlank()) throw AiException("No chat model set for ${config.id.displayName}")
         val body = buildJsonObject {
             put("model", config.chatModel)
-            put("max_tokens", request.maxTokens)
+            put("max_tokens", request.outputLimit ?: request.maxTokens)
             put("system", request.system)
             putJsonArray("messages") {
                 request.messages.normalizedTurns().forEach {

@@ -74,28 +74,30 @@ class SpeakerSplittingTest {
         val alice = floatArrayOf(1f, 0.1f, 0f)
         val bob = floatArrayOf(0f, 1f, 0.1f)
         val items = listOf(
-            SpeakerClusters.Item(0, alice), SpeakerClusters.Item(0, bob),
-            SpeakerClusters.Item(1, floatArrayOf(0.1f, 1f, 0f)), SpeakerClusters.Item(1, floatArrayOf(0.95f, 0f, 0.1f)),
+            SpeakerClusters.Item(alice), SpeakerClusters.Item(bob),
+            SpeakerClusters.Item(floatArrayOf(0.1f, 1f, 0f)), SpeakerClusters.Item(floatArrayOf(0.95f, 0f, 0.1f)),
         )
         assertContentEquals(intArrayOf(0, 1, 1, 0), SpeakerClusters.merge(items))
     }
 
     @Test
-    fun `speakers in the same block stay apart unless a target forces it`() {
-        val a = floatArrayOf(1f, 0f)
-        val b = floatArrayOf(0.9f, 0.3f)
-        val items = listOf(SpeakerClusters.Item(0, a), SpeakerClusters.Item(0, b))
-        assertContentEquals(intArrayOf(0, 1), SpeakerClusters.merge(items))
-        assertContentEquals(intArrayOf(0, 0), SpeakerClusters.merge(items, target = 1))
+    fun `one voice split into two clusters is joined and different voices stay apart`() {
+        val items = listOf(
+            SpeakerClusters.Item(floatArrayOf(1f, 0f)),
+            SpeakerClusters.Item(floatArrayOf(0.9f, 0.3f)),
+            SpeakerClusters.Item(floatArrayOf(0f, 1f)),
+        )
+        assertContentEquals(intArrayOf(0, 0, 1), SpeakerClusters.merge(items))
+        assertContentEquals(intArrayOf(0, 0, 0), SpeakerClusters.merge(items, target = 1))
     }
 
     @Test
     fun `a target count merges the most similar speakers first`() {
         val items = listOf(
-            SpeakerClusters.Item(0, floatArrayOf(1f, 0f, 0f)),
-            SpeakerClusters.Item(1, floatArrayOf(0f, 1f, 0f)),
-            SpeakerClusters.Item(2, floatArrayOf(0f, 0f, 1f)),
-            SpeakerClusters.Item(3, floatArrayOf(0.2f, 0f, 1f)),
+            SpeakerClusters.Item(floatArrayOf(1f, 0f, 0f)),
+            SpeakerClusters.Item(floatArrayOf(0f, 1f, 0f)),
+            SpeakerClusters.Item(floatArrayOf(0f, 0f, 1f)),
+            SpeakerClusters.Item(floatArrayOf(0.2f, 0f, 1f)),
         )
         assertContentEquals(intArrayOf(0, 1, 2, 2), SpeakerClusters.merge(items, target = 3))
     }

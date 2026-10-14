@@ -14,6 +14,11 @@ data class LlmRequest(
     /** Ask the provider to return a JSON object, where it supports that. */
     val jsonMode: Boolean = false,
     val maxTokens: Int = 8192,
+    /**
+     * Caps the reply on every provider, including those that otherwise let a model write until it
+     * hits its own limit. Bounds how long a request can run if a model starts repeating itself.
+     */
+    val outputLimit: Int? = null,
 )
 
 interface LlmClient {

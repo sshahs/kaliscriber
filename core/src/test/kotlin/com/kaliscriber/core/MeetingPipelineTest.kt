@@ -316,6 +316,53 @@ class MeetingPipelineTest {
     }
 
     @Test
+    fun `failed on-device detection is reported instead of falling back to the ai`() = runTest {
+        val stt = FakeLocalStt(emptyList()) { SttResult(listOf(RawSegment(0, 2_000, "Hi, I'm Priya. Hello Priya!")), diarized = false) }
+        stt.diarizeError = IllegalStateException("native failure")
+        settings = settings.copy(autoAnalyze = false, suggestSpeakerNames = false)
+        val ai = FakeAi(llm(), stt)
+        val p = pipeline(ai)
+        val meeting = repo.create()
+        p.transcribeChunk(meeting.id, AudioChunk(0, chunkFile("c0.wav").path, 0, 2_000))
+        p.finishRecording(meeting.id, chunkFile("recording.m4a"), 2_000)
+
+        val m = repo.get(meeting.id)!!
+        assertTrue((ai.llm as FakeLlm).requests.none { it.system == Prompts.SEPARATE_SPEAKERS_SYSTEM })
+        assertEquals("Speaker detection on this phone failed: native failure", m.lastError)
+        assertEquals(MeetingStatus.READY, m.status)
+
+        val e = kotlin.runCatching { p.redetectSpeakers(meeting.id) }.exceptionOrNull()
+        assertTrue(e is AiException && e.message!!.contains("native failure"), e.toString())
+        assertTrue((ai.llm as FakeLlm).requests.none { it.system == Prompts.SEPARATE_SPEAKERS_SYSTEM })
+    }
+
+    @Test
+    fun `a slow ai part is skipped after the time limit`() = runTest {
+        val long = "word ".repeat(700)
+        val slow = object : com.kaliscriber.core.ai.llm.LlmClient {
+            override val config = AppSettings().configFor(com.kaliscriber.core.ai.ProviderId.OPENAI, "k")
+            override suspend fun complete(request: LlmRequest): String {
+                if (request.messages.last().content.contains("| TWO")) kotlinx.coroutines.delay(60_000)
+                return """{"turns":[{"i":0,"s":"S1"}]}"""
+            }
+            override suspend fun listModels() = emptyList<String>()
+        }
+        val meeting = Meeting(
+            id = "m", title = "t", createdAt = 0,
+            segments = listOf("ONE", "TWO", "THREE").mapIndexed { i, w ->
+                com.kaliscriber.core.model.TranscriptSegment("s$i", i * 60_000L, (i + 1) * 60_000L, "$w $long")
+            },
+        )
+        val parts = mutableListOf<Int>()
+        val ai = MeetingAi(FakeAi(slow, FakeStt(false) { SttResult(emptyList(), false) }), { settings })
+        val result = ai.separateSpeakers(meeting, partTimeoutMs = 1_000) { part, _ -> parts += part }
+        assertEquals(1, result.failedParts)
+        assertTrue(result.error!!.contains("longer than"), result.error)
+        assertEquals(listOf(0, 1, 2, 3), parts)
+        assertEquals(3, result.result.segments.size)
+    }
+
+    @Test
     fun `a part the ai cannot separate keeps the rest of the meeting`() = runTest {
         val long = "word ".repeat(700)
         val stt = FakeStt(supportsDiarization = false) {

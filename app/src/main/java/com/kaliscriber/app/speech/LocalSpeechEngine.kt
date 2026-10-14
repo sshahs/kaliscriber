@@ -261,9 +261,10 @@ class LocalSpeechEngine(
     }
 
     /**
-     * Diarizes the recording on the phone. Meetings longer than [BLOCK_SECONDS] are processed in
-     * equal blocks so only one block of audio is in memory at a time; the speakers each block finds
-     * are then matched across blocks by their voiceprints.
+     * Diarizes the recording on the phone in blocks of up to [BLOCK_SECONDS], so only one block of
+     * audio is in memory at a time. Each block's speakers get a voiceprint, and the voiceprints are
+     * then merged across the meeting: this matches people between blocks and also rejoins one
+     * person the diarizer split in two. A known speaker count is applied in that merge.
      */
     override suspend fun diarize(audio: File, speakers: Int?, onProgress: (Float) -> Unit): List<SpeakerTurn> = withContext(Dispatchers.Default) {
         lock.withLock {
@@ -272,9 +273,12 @@ class LocalSpeechEngine(
             val totalSamples = AudioDecoder.estimateSamples(audio)
             val blocks = totalSamples?.let { ((it + BLOCK_SECONDS * rate - 1) / (BLOCK_SECONDS * rate)).toInt().coerceAtLeast(1) } ?: 1
             val blockSamples = totalSamples?.let { ((it + blocks - 1) / blocks).toInt() + rate } ?: (BLOCK_SECONDS * rate)
-            val singleBlock = totalSamples != null && blocks == 1
 
-            fun diarizerFor(numClusters: Int) = OfflineSpeakerDiarization(
+            val embeddingConfig = SpeakerEmbeddingExtractorConfig(
+                model = models.file(ModelCatalog.embedding, ".onnx").absolutePath,
+                numThreads = threads,
+            )
+            val diarizer = OfflineSpeakerDiarization(
                 null,
                 OfflineSpeakerDiarizationConfig(
                     segmentation = OfflineSpeakerSegmentationModelConfig(
@@ -283,26 +287,17 @@ class LocalSpeechEngine(
                         ),
                         numThreads = threads,
                     ),
-                    embedding = SpeakerEmbeddingExtractorConfig(
-                        model = models.file(ModelCatalog.embedding, ".onnx").absolutePath,
-                        numThreads = threads,
-                    ),
-                    // A known speaker count beats threshold-based clustering, but in blocks of a long
-                    // meeting not everyone speaks, so the count is applied when blocks are joined.
-                    clustering = FastClusteringConfig(numClusters = numClusters, threshold = 0.5f),
+                    embedding = embeddingConfig,
+                    // Threshold clustering per block; the speaker count is applied when voiceprints are merged.
+                    clustering = FastClusteringConfig(numClusters = -1, threshold = 0.5f),
                     minDurationOn = 0.3f,
                     minDurationOff = 0.5f,
                 ),
             )
-
-            val diarizer = diarizerFor(if (singleBlock) speakers ?: -1 else -1)
-            val extractor = SpeakerEmbeddingExtractor(
-                null,
-                SpeakerEmbeddingExtractorConfig(model = models.file(ModelCatalog.embedding, ".onnx").absolutePath, numThreads = threads),
-            )
+            val extractor = SpeakerEmbeddingExtractor(null, embeddingConfig)
             val started = SystemClock.elapsedRealtime()
             Log.i(TAG, "Diarizing ${audio.name} in $blocks block(s) (speakers=${speakers ?: "auto"})")
-            // Turns per block with block-local speaker numbers, and a voiceprint per block speaker.
+            // Turns with their block and block-local speaker number, and a voiceprint per block speaker.
             val blockTurns = mutableListOf<Triple<Int, Int, SpeakerTurn>>()
             val clusters = mutableListOf<Pair<Pair<Int, Int>, SpeakerClusters.Item>>()
             try {
@@ -311,6 +306,8 @@ class LocalSpeechEngine(
 
                 fun process(samples: FloatArray) {
                     val index = blockIndex
+                    val blockStarted = SystemClock.elapsedRealtime()
+                    onProgress((index.toFloat() / blocks).coerceAtMost(1f))
                     val segments = diarizer.processWithCallback(samples, callback = { processed, total, _ ->
                         if (total > 0) onProgress(((index + processed.toFloat() / total) / blocks).coerceAtMost(1f))
                         0 // keep going
@@ -319,19 +316,22 @@ class LocalSpeechEngine(
                     segments.forEach {
                         blockTurns += Triple(index, it.speaker, SpeakerTurn(offsetMs + (it.start * 1000).toLong(), offsetMs + (it.end * 1000).toLong(), ""))
                     }
-                    if (!singleBlock) {
-                        for ((speaker, turns) in segments.groupBy { it.speaker }) {
-                            val voice = FloatArrayBuilder()
-                            for (t in turns.sortedByDescending { it.end - it.start }) {
-                                if (voice.size >= VOICEPRINT_SECONDS * rate) break
-                                val from = (t.start * rate).toInt().coerceIn(0, samples.size)
-                                val to = (t.end * rate).toInt().coerceIn(from, samples.size)
-                                voice.append(samples, from, to)
-                            }
-                            val print = voiceprint(extractor, voice) ?: continue
-                            clusters += (index to speaker) to SpeakerClusters.Item(index, print, turns.sumOf { (it.end - it.start).toDouble() })
+                    for ((speaker, turns) in segments.groupBy { it.speaker }) {
+                        val voice = FloatArrayBuilder()
+                        for (t in turns.sortedByDescending { it.end - it.start }) {
+                            if (voice.size >= VOICEPRINT_SECONDS * rate) break
+                            val from = (t.start * rate).toInt().coerceIn(0, samples.size)
+                            val to = (t.end * rate).toInt().coerceIn(from, samples.size)
+                            voice.append(samples, from, to)
                         }
+                        val print = voiceprint(extractor, voice) ?: continue
+                        clusters += (index to speaker) to SpeakerClusters.Item(print, turns.sumOf { (it.end - it.start).toDouble() })
                     }
+                    Log.i(
+                        TAG,
+                        "Block ${index + 1}/$blocks (${samples.size / rate}s): ${segments.map { it.speaker }.distinct().size} speakers, " +
+                            "${segments.size} turns in ${SystemClock.elapsedRealtime() - blockStarted} ms",
+                    )
                     offset += samples.size
                     blockIndex++
                 }
@@ -359,16 +359,20 @@ class LocalSpeechEngine(
                 extractor.release()
             }
 
-            // Join block speakers into meeting-wide speakers.
-            val global: Map<Pair<Int, Int>, Int> = if (clusters.isEmpty()) {
+            // Merge block speakers into meeting-wide speakers by voice.
+            val global = if (clusters.isEmpty()) {
                 emptyMap()
             } else {
                 val ids = SpeakerClusters.merge(clusters.map { it.second }, target = speakers)
                 clusters.mapIndexed { i, (key, _) -> key to ids[i] }.toMap()
             }
-            // Block speakers with too little speech for a voiceprint are dropped; their lines go to a neighbouring turn.
             val turns = blockTurns.mapNotNull { (block, speaker, turn) ->
-                val id = if (singleBlock) "$speaker" else global[block to speaker]?.toString() ?: return@mapNotNull null
+                val id = when {
+                    // No usable voiceprints at all: keep the diarizer's own labels.
+                    global.isEmpty() -> "$block-$speaker"
+                    // Too little speech for a voiceprint: its lines go to a neighbouring turn.
+                    else -> global[block to speaker]?.toString() ?: return@mapNotNull null
+                }
                 turn.copy(speaker = id)
             }
             Log.i(TAG, "Diarization found ${turns.map { it.speaker }.distinct().size} speakers in ${SystemClock.elapsedRealtime() - started} ms")
@@ -473,8 +477,8 @@ class LocalSpeechEngine(
     private companion object {
         const val TAG = "KaliScriber"
         const val VAD_WINDOW = 512
-        /** Longest stretch diarized in one go (about 77 MB of audio in memory). */
-        const val BLOCK_SECONDS = 20 * 60
+        /** Longest stretch diarized in one go (about 38 MB of audio in memory). */
+        const val BLOCK_SECONDS = 10 * 60
         const val VOICEPRINT_SECONDS = 30
     }
 }

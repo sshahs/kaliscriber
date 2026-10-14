@@ -47,7 +47,7 @@ Transcription runs **on the phone** with [sherpa-onnx](https://github.com/k2-fsa
 | Whisper Base / Tiny / Small | 99 languages | 198 / 111 / 610 MB |
 | SenseVoice | Chinese, Cantonese, English, Japanese, Korean | 155 MB |
 
-Silero VAD (1 MB) splits audio into utterances. The **speaker detection pack** (pyannote segmentation plus a 3D-Speaker embedding model, 45 MB) tells voices apart on-device when a meeting ends. It downloads together with a speech model, or on demand when a meeting ends without it. Long meetings are processed in 20-minute blocks whose speakers are matched by voiceprint, and lines are split at the word where the speaker changes.
+Silero VAD (1 MB) splits audio into utterances. The **speaker detection pack** (pyannote segmentation plus a 3D-Speaker embedding model, 45 MB) tells voices apart on-device when a meeting ends. It downloads together with a speech model, or on demand when a meeting ends without it. Recordings are processed in 10-minute blocks; every speaker found gets a voiceprint, and voiceprints are merged across the meeting, which matches people between blocks and rejoins one person the diarizer split in two. Lines are split at the word where the speaker changes. Speaker detection and other long jobs run under a foreground service, so they finish with the app in the background.
 
 You can switch transcription to **ElevenLabs Scribe** (with speaker labels) or any of the cloud options below instead.
 

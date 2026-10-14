@@ -67,12 +67,16 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     val voicePhase: StateFlow<VoicePhase> = _voicePhase.asStateFlow()
     private var voiceJob: Job? = null
 
-    private fun launchTask(kind: Busy, success: String? = null, block: suspend () -> Unit) {
+    /**
+     * Runs a task for this meeting and reports the outcome. [background] tasks keep running when the
+     * user leaves the screen or the app (see [com.kaliscriber.app.processing.MeetingJobs]).
+     */
+    private fun launchTask(kind: Busy, success: String? = null, background: Boolean = false, block: suspend () -> Unit) {
         if (kind in _busy.value) return
         _busy.update { it + kind }
         viewModelScope.launch {
             try {
-                block()
+                if (background) container.jobs.run(meetingId, block) else block()
                 if (success != null) _messages.send(success)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -83,12 +87,12 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         }
     }
 
-    fun generateInsights() = launchTask(Busy.INSIGHTS) { pipeline.generateInsights(meetingId) }
-    fun generateGaps() = launchTask(Busy.GAPS) { pipeline.generateGaps(meetingId) }
-    fun refreshWithAnswers() = launchTask(Busy.INSIGHTS, "Summary updated with your answers") { pipeline.refreshWithAnswers(meetingId) }
-    fun separateSpeakers() = launchTask(Busy.SPEAKERS, "Speakers re-detected") { pipeline.redetectSpeakers(meetingId, aiOnly = true) }
+    fun generateInsights() = launchTask(Busy.INSIGHTS, background = true) { pipeline.generateInsights(meetingId) }
+    fun generateGaps() = launchTask(Busy.GAPS, background = true) { pipeline.generateGaps(meetingId) }
+    fun refreshWithAnswers() = launchTask(Busy.INSIGHTS, "Summary updated with your answers", background = true) { pipeline.refreshWithAnswers(meetingId) }
+    fun separateSpeakers() = launchTask(Busy.SPEAKERS, "Speakers re-detected", background = true) { pipeline.redetectSpeakers(meetingId, aiOnly = true) }
     fun suggestNames() = launchTask(Busy.NAMES, "Name suggestions updated") { pipeline.suggestSpeakerNames(meetingId) }
-    fun retryPending() = launchTask(Busy.RETRY) {
+    fun retryPending() = launchTask(Busy.RETRY, background = true) {
         pipeline.retryPendingChunks(meetingId)
         pipeline.analyze(meetingId)
     }
@@ -253,7 +257,7 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     /** MB still to download for on-device speaker detection, or null when it is ready or not used. */
     val speakerPackDownloadMb: Int? get() = if (container.speakerPackMissing) container.models.diarizationDownloadMb else null
 
-    fun redetectSpeakers() = launchTask(Busy.SPEAKERS, "Speakers detected again") { pipeline.redetectSpeakers(meetingId) }
+    fun redetectSpeakers() = launchTask(Busy.SPEAKERS, "Speakers detected again", background = true) { pipeline.redetectSpeakers(meetingId) }
 
     // --- Export ---------------------------------------------------------------------------------
 

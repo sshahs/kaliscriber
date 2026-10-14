@@ -13,6 +13,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -31,6 +32,7 @@ class OllamaLlm(
             put("model", config.chatModel)
             put("stream", false)
             if (request.jsonMode) put("format", "json")
+            request.outputLimit?.let { limit -> putJsonObject("options") { put("num_predict", limit) } }
             putJsonArray("messages") {
                 add(buildJsonObject { put("role", "system"); put("content", request.system) })
                 request.messages.normalizedTurns().forEach {
