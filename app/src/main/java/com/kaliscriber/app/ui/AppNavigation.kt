@@ -11,6 +11,7 @@ import com.kaliscriber.app.ui.ask.AskAllScreen
 import com.kaliscriber.app.ui.home.HomeScreen
 import com.kaliscriber.app.ui.meeting.MeetingScreen
 import com.kaliscriber.app.ui.notes.NoteScreen
+import com.kaliscriber.app.ui.people.PersonScreen
 import com.kaliscriber.app.ui.recording.RecordingScreen
 import com.kaliscriber.app.ui.settings.SettingsScreen
 
@@ -21,6 +22,8 @@ object Routes {
     const val MEETING = "meeting/{id}?tab={tab}&seg={seg}"
     const val NOTE = "note/{id}"
     const val ASK_ALL = "ask-all?q={q}"
+    const val PERSON = "person/{name}"
+    fun person(name: String) = "person/${Uri.encode(name)}"
     fun meeting(id: String, tab: Int = 0, segmentId: String? = null) =
         "meeting/$id?tab=$tab" + (segmentId?.let { "&seg=${Uri.encode(it)}" } ?: "")
     fun note(id: String) = "note/$id"
@@ -40,7 +43,16 @@ fun AppNavigation(openTasks: Boolean = false) {
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                 onOpenMeetingAt = { id, segmentId -> nav.navigate(Routes.meeting(id, tab = if (segmentId != null) 1 else 0, segmentId = segmentId)) },
                 onAskAll = { nav.navigate(Routes.askAll(it)) },
+                onOpenPerson = { nav.navigate(Routes.person(it)) },
                 startTab = if (openTasks) 2 else 0,
+            )
+        }
+        composable(Routes.PERSON, arguments = listOf(navArgument("name") { type = NavType.StringType })) { entry ->
+            PersonScreen(
+                name = entry.arguments?.getString("name").orEmpty(),
+                onBack = { nav.popBackStack() },
+                onOpenMeeting = { nav.navigate(Routes.meeting(it)) },
+                onAsk = { nav.navigate(Routes.askAll(it)) },
             )
         }
         composable(Routes.ASK_ALL, arguments = listOf(navArgument("q") { type = NavType.StringType; nullable = true; defaultValue = null })) { entry ->

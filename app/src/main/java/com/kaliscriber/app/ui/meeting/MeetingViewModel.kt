@@ -91,6 +91,15 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     fun generateGaps() = launchTask(Busy.GAPS, background = true) { pipeline.generateGaps(meetingId) }
     fun refreshWithAnswers() = launchTask(Busy.INSIGHTS, "Summary updated with your answers", background = true) { pipeline.refreshWithAnswers(meetingId) }
     fun separateSpeakers() = launchTask(Busy.SPEAKERS, "Speakers re-detected", background = true) { pipeline.redetectSpeakers(meetingId, aiOnly = true) }
+    fun applyGlossary() = launchTask(Busy.NAMES, background = true) {
+        if (container.settings().glossary.isBlank()) {
+            _messages.send("Add names and terms to the glossary in Settings first.")
+            return@launchTask
+        }
+        val changed = pipeline.applyGlossary(meetingId)
+        _messages.send(if (changed == 0) "No misheard glossary words found" else "Fixed $changed line${if (changed == 1) "" else "s"} from your glossary")
+    }
+
     fun suggestNames() = launchTask(Busy.NAMES, "Name suggestions updated") { pipeline.suggestSpeakerNames(meetingId) }
     fun retryPending() = launchTask(Busy.RETRY, background = true) {
         pipeline.retryPendingChunks(meetingId)

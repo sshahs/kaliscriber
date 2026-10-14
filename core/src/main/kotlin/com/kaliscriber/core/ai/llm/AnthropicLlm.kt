@@ -12,6 +12,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -26,7 +27,21 @@ class AnthropicLlm(
         val body = buildJsonObject {
             put("model", config.chatModel)
             put("max_tokens", request.outputLimit ?: request.maxTokens)
-            put("system", request.system)
+            val prefix = request.cachePrefix?.takeIf { request.system.startsWith(it) && it.length >= MIN_CACHE_CHARS }
+            if (prefix == null) {
+                put("system", request.system)
+            } else {
+                // Mark the shared meeting text as cacheable; the task that follows is sent uncached.
+                putJsonArray("system") {
+                    add(buildJsonObject {
+                        put("type", "text")
+                        put("text", prefix)
+                        putJsonObject("cache_control") { put("type", "ephemeral") }
+                    })
+                    val rest = request.system.substring(prefix.length)
+                    if (rest.isNotBlank()) add(buildJsonObject { put("type", "text"); put("text", rest) })
+                }
+            }
             putJsonArray("messages") {
                 request.messages.normalizedTurns().forEach {
                     add(buildJsonObject {
@@ -50,6 +65,11 @@ class AnthropicLlm(
         return json["data"]?.jsonArray.orEmpty()
             .filterIsInstance<JsonObject>()
             .mapNotNull { it["id"]?.jsonPrimitive?.contentOrNull }
+    }
+
+    private companion object {
+        /** Anthropic only caches prompts of at least ~1024 tokens; shorter ones are sent plainly. */
+        const val MIN_CACHE_CHARS = 4_000
     }
 
     private fun baseRequest(path: String) = Request.Builder()

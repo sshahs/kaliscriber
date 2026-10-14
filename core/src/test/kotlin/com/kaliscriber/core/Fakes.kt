@@ -6,6 +6,7 @@ import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.ai.llm.LlmClient
 import com.kaliscriber.core.ai.llm.LlmRequest
 import com.kaliscriber.core.ai.stt.SpeakerDiarizer
+import com.kaliscriber.core.ai.stt.DiarizedBlock
 import com.kaliscriber.core.ai.stt.SpeakerTurn
 import com.kaliscriber.core.ai.stt.SttClient
 import com.kaliscriber.core.ai.stt.SttResult
@@ -62,6 +63,12 @@ class FakeLocalStt(
         onProgress(0.5f)
         onProgress(1f)
         return turns
+    }
+    var blockCalls = 0
+    var block: ((List<File>, Long) -> DiarizedBlock?)? = null
+    override suspend fun diarizeBlock(audio: List<File>, offsetMs: Long): DiarizedBlock? {
+        blockCalls++
+        return block?.invoke(audio, offsetMs)
     }
 }
 

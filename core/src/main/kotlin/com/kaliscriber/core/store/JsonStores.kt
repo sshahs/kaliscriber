@@ -1,6 +1,10 @@
 package com.kaliscriber.core.store
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,7 +18,8 @@ import java.io.File
 
 val StoreJson = Json {
     ignoreUnknownKeys = true
-    encodeDefaults = true
+    // Default values are left out of files, which keeps long meetings compact on disk.
+    encodeDefaults = false
     explicitNulls = false
     coerceInputValues = true
 }
@@ -40,6 +45,11 @@ internal fun File.writeAtomically(text: String) {
 class JsonDocumentStore<T>(
     private val dir: File,
     private val serializer: KSerializer<T>,
+    /**
+     * The part of a document worth saving. Changes that only touch the rest (such as a progress
+     * indicator) update memory without rewriting the file.
+     */
+    private val persisted: (T) -> T = { it },
     private val idOf: (T) -> String,
 ) {
     private val mutex = Mutex()
@@ -55,8 +65,12 @@ class JsonDocumentStore<T>(
         if (_loaded.value) return
         val loadedItems = withContext(Dispatchers.IO) {
             dir.mkdirs()
-            dir.listFiles { f -> f.isFile && f.extension == "json" }.orEmpty().mapNotNull { file ->
-                runCatching { StoreJson.decodeFromString(serializer, file.readText()) }.getOrNull()
+            val files = dir.listFiles { f -> f.isFile && f.extension == "json" }.orEmpty().toList()
+            // Decode several documents at once; long transcripts make this the slow part of startup.
+            coroutineScope {
+                files.map { file ->
+                    async(LOAD_DISPATCHER) { runCatching { StoreJson.decodeFromString(serializer, file.readText()) }.getOrNull() }
+                }.awaitAll().filterNotNull()
             }
         }
         _items.value = loadedItems.associateBy(idOf)
@@ -77,7 +91,7 @@ class JsonDocumentStore<T>(
         val current = _items.value[id] ?: return@withLock null
         val next = transform(current)
         if (next != current) {
-            write(next)
+            if (persisted(next) != persisted(current)) write(next)
             _items.update { it + (id to next) }
         }
         next
@@ -90,7 +104,12 @@ class JsonDocumentStore<T>(
     }
 
     private suspend fun write(item: T) = withContext(Dispatchers.IO) {
-        fileFor(idOf(item)).writeAtomically(StoreJson.encodeToString(serializer, item))
+        fileFor(idOf(item)).writeAtomically(StoreJson.encodeToString(serializer, persisted(item)))
+    }
+
+    private companion object {
+        @OptIn(ExperimentalCoroutinesApi::class)
+        val LOAD_DISPATCHER = Dispatchers.IO.limitedParallelism(4)
     }
 
     private fun fileFor(id: String) = File(dir, "${id.replace(Regex("[^A-Za-z0-9_-]"), "_")}.json")

@@ -4,30 +4,43 @@ import com.kaliscriber.core.ai.AiException
 import com.kaliscriber.core.ai.AiServices
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.MeetingAi
+import com.kaliscriber.core.ai.Prompts
+import com.kaliscriber.core.ai.stt.DiarizedBlock
 import com.kaliscriber.core.ai.stt.SpeakerDiarizer
-import com.kaliscriber.core.ai.stt.VoiceEmbedder
+import com.kaliscriber.core.ai.stt.SpeakerTurn
 import com.kaliscriber.core.ai.stt.SttResult
+import com.kaliscriber.core.ai.stt.VoiceEmbedder
 import com.kaliscriber.core.model.AudioChunk
 import com.kaliscriber.core.model.Briefing
 import com.kaliscriber.core.model.ChatMessage
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
+import com.kaliscriber.core.model.MeetingSection
 import com.kaliscriber.core.model.MeetingStatus
+import com.kaliscriber.core.speakers.BlockMerge
 import com.kaliscriber.core.speakers.SpeakerAssigner
 import com.kaliscriber.core.speakers.VoiceLibrary
 import com.kaliscriber.core.store.MeetingRepository
 import com.kaliscriber.core.tasks.ActionItems
+import com.kaliscriber.core.transcript.Glossary
+import com.kaliscriber.core.transcript.TranscriptFormatter
 import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
 
 /**
@@ -56,7 +69,129 @@ class MeetingPipeline(
      * Throws if that fails.
      */
     private val fetchDiarizationModels: suspend (onProgress: suspend (Float) -> Unit) -> Unit = {},
+    /**
+     * Runs work in the background while a meeting is being recorded: speaker detection on each
+     * ten-minute block and running notes. Without it, all of that happens after the meeting ends.
+     */
+    private val liveScope: CoroutineScope? = null,
 ) {
+
+    /** Work in progress for a meeting that is still being recorded. */
+    private class LiveSession(val firstChunk: Int, val detectsSpeakers: Boolean) {
+        val lock = Mutex()
+        /** Recorded chunks not yet diarized. */
+        val waiting = mutableListOf<AudioChunk>()
+        /** Every chunk seen, so their audio files can be removed when the meeting ends. */
+        val chunks = mutableListOf<AudioChunk>()
+        val blocks = mutableListOf<DiarizedBlock>()
+        var diarizing: Job? = null
+        var notes: Job? = null
+        @Volatile var diarizationFailed = false
+    }
+
+    private val live = ConcurrentHashMap<String, LiveSession>()
+
+    /** The on-device diarizer when speakers should be detected during recording, else null. */
+    private fun liveDiarizer(): SpeakerDiarizer? {
+        val s = settings()
+        if (liveScope == null || !s.localDiarization || !s.finalDiarizationPass) return null
+        return (runCatching { ai.stt() }.getOrNull() as? SpeakerDiarizer)?.takeIf { it.diarizationAvailable }
+    }
+
+    /** Called for each recorded chunk, in order, once its transcription was attempted. */
+    private fun onLiveChunk(meetingId: String, chunk: AudioChunk) {
+        val scope = liveScope ?: return
+        val session = live.getOrPut(meetingId) { LiveSession(chunk.index, detectsSpeakers = liveDiarizer() != null) }
+        synchronized(session) {
+            session.chunks += chunk
+            if (session.detectsSpeakers && !session.diarizationFailed) {
+                session.waiting += chunk
+                if (session.diarizing?.isActive != true) session.diarizing = scope.launch { diarizeLiveBlocks(meetingId, session, final = false) }
+            }
+            if (settings().liveNotes && session.notes?.isActive != true) session.notes = scope.launch { writeSectionNotes(meetingId) }
+        }
+    }
+
+    /** Diarizes waiting chunks in blocks of about [LIVE_BLOCK_MS]; [final] also takes a shorter last block. */
+    private suspend fun diarizeLiveBlocks(meetingId: String, session: LiveSession, final: Boolean) = session.lock.withLock {
+        val diarizer = liveDiarizer() ?: run {
+            session.diarizationFailed = true
+            return@withLock
+        }
+        while (!session.diarizationFailed) {
+            val block = synchronized(session) {
+                val waitingMs = session.waiting.sumOf { it.endMs - it.startMs }
+                if (session.waiting.isEmpty() || (!final && waitingMs < LIVE_BLOCK_MS)) return@synchronized null
+                // Blocks of at most LIVE_BLOCK_MS keep memory use bounded.
+                var total = 0L
+                val take = session.waiting.takeWhile { c -> (total < LIVE_BLOCK_MS).also { total += c.endMs - c.startMs } }
+                repeat(take.size) { session.waiting.removeAt(0) }
+                take
+            } ?: break
+            val started = clock.now()
+            try {
+                val result = diarizer.diarizeBlock(block.map { File(it.path) }, block.first().startMs)
+                if (result == null) {
+                    session.diarizationFailed = true
+                } else {
+                    session.blocks += result
+                    log(
+                        "Live speaker detection: ${TranscriptFormatter.timestamp(block.first().startMs)}–" +
+                            "${TranscriptFormatter.timestamp(block.last().endMs)} in ${(clock.now() - started) / 1000}s, ${result.voices.size} voices",
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                session.diarizationFailed = true
+                log("Live speaker detection failed, will detect after the meeting: ${describe(e)}")
+            }
+        }
+    }
+
+    /**
+     * Ends live work for a meeting: diarizes the last block and joins all blocks into speaker turns.
+     * Null when live detection did not cover the whole meeting, so the full recording is used instead.
+     */
+    private suspend fun finishLive(meetingId: String): List<SpeakerTurn>? {
+        val session = live.remove(meetingId) ?: return null
+        session.notes?.cancelAndJoin()
+        try {
+            if (session.firstChunk != 0 || session.diarizationFailed || liveDiarizer() == null) return null
+            stage(meetingId, "Detecting speakers in the last part of the meeting") {
+                session.diarizing?.join()
+                diarizeLiveBlocks(meetingId, session, final = true)
+            }
+            if (session.diarizationFailed || session.blocks.isEmpty()) return null
+            return BlockMerge.merge(session.blocks, repo.get(meetingId)?.expectedSpeakers).takeIf { it.isNotEmpty() }
+        } finally {
+            val pending = repo.get(meetingId)?.pendingChunks.orEmpty().map { it.path }.toSet()
+            session.chunks.filter { it.path !in pending }.forEach { deleteQuietly(it.path) }
+        }
+    }
+
+    /** Writes notes for each stretch of about [LIVE_NOTES_MS] of transcript while recording. */
+    private suspend fun writeSectionNotes(meetingId: String) {
+        while (true) {
+            val m = repo.get(meetingId) ?: return
+            if (m.status != MeetingStatus.RECORDING || !settings().liveNotes) return
+            val from = m.sections.lastOrNull()?.endMs ?: 0L
+            val rest = m.segments.filter { it.startMs >= from }
+            if (rest.isEmpty() || rest.last().endMs - from < LIVE_NOTES_MS) return
+            val part = rest.takeWhile { it.startMs < from + LIVE_NOTES_MS }.ifEmpty { return }
+            val started = clock.now()
+            val notes = try {
+                meetingAi.sectionNotes(m, part)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("Running notes failed (the summary will use the transcript): ${describe(e)}")
+                return
+            }
+            log("Running notes for ${TranscriptFormatter.timestamp(from)}–${TranscriptFormatter.timestamp(part.last().endMs)} in ${(clock.now() - started) / 1000}s")
+            repo.update(meetingId) { it.copy(sections = it.sections + MeetingSection(from, part.last().endMs, notes)) }
+        }
+    }
 
     /** Shows what processing is doing on the meeting, and logs how long each step takes. */
     private suspend fun <T> stage(meetingId: String, label: String, block: suspend () -> T): T {
@@ -77,25 +212,34 @@ class MeetingPipeline(
         repo.update(meetingId) { it.copy(processingProgress = fraction.coerceIn(0f, 1f)) }
     }
 
-    /** Transcribes one live chunk and appends it. Returns false (and queues the chunk) on failure. */
-    suspend fun transcribeChunk(meetingId: String, chunk: AudioChunk): Boolean = try {
-        val started = clock.now()
-        val result = transcribeFile(File(chunk.path), chunk.endMs - chunk.startMs, repo.get(meetingId)?.expectedSpeakers)
-        log("Chunk ${chunk.index} (${(chunk.endMs - chunk.startMs) / 1000}s audio): ${result.segments.size} segments in ${clock.now() - started} ms")
-        appendChunk(meetingId, chunk, result)
-        deleteQuietly(chunk.path)
-        true
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        repo.update(meetingId) { m ->
-            m.copy(
-                pendingChunks = (m.pendingChunks.filter { it.index != chunk.index } + chunk).sortedBy { it.index },
-                lastError = describe(e),
-                durationMs = maxOf(m.durationMs, chunk.endMs),
-            )
+    /**
+     * Transcribes one chunk and appends it. Returns false (and queues the chunk) on failure. [recording]
+     * is true for chunks arriving live, which also feed speaker detection and notes during the meeting.
+     */
+    suspend fun transcribeChunk(meetingId: String, chunk: AudioChunk, recording: Boolean = true): Boolean {
+        val ok = try {
+            val started = clock.now()
+            val result = transcribeFile(File(chunk.path), chunk.endMs - chunk.startMs, repo.get(meetingId)?.expectedSpeakers)
+            log("Chunk ${chunk.index} (${(chunk.endMs - chunk.startMs) / 1000}s audio): ${result.segments.size} segments in ${clock.now() - started} ms")
+            appendChunk(meetingId, chunk, result)
+            // Live speaker detection still needs the audio; it removes the file when the meeting ends.
+            val neededLive = live[meetingId]?.let { it.detectsSpeakers && !it.diarizationFailed } ?: (recording && liveDiarizer() != null)
+            if (!neededLive) deleteQuietly(chunk.path)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            repo.update(meetingId) { m ->
+                m.copy(
+                    pendingChunks = (m.pendingChunks.filter { it.index != chunk.index } + chunk).sortedBy { it.index },
+                    lastError = describe(e),
+                    durationMs = maxOf(m.durationMs, chunk.endMs),
+                )
+            }
+            false
         }
-        false
+        if (recording) onLiveChunk(meetingId, chunk)
+        return ok
     }
 
     private suspend fun appendChunk(meetingId: String, chunk: AudioChunk, result: SttResult) {
@@ -129,7 +273,7 @@ class MeetingPipeline(
                 repo.update(meetingId) { m -> m.copy(pendingChunks = m.pendingChunks.filter { it.index != chunk.index }) }
                 continue
             }
-            transcribeChunk(meetingId, chunk)
+            transcribeChunk(meetingId, chunk, recording = false)
         }
     }
 
@@ -143,15 +287,32 @@ class MeetingPipeline(
                 lastError = null,
             )
         }
-        val outcome = if (audioFile != null && settings().finalDiarizationPass) tryFullDiarization(meetingId, audioFile, durationMs) else Detection.SKIPPED
-        if (outcome == Detection.DONE) {
-            repo.get(meetingId)?.pendingChunks?.forEach { deleteQuietly(it.path) }
-            repo.update(meetingId) { it.copy(pendingChunks = emptyList()) }
-        } else {
-            retryPendingChunks(meetingId)
+        // On-device engines label the live transcript, so parts that failed to transcribe are retried first.
+        val onDevice = runCatching { ai.stt() }.getOrNull() is SpeakerDiarizer
+        if (onDevice) retryPendingChunks(meetingId)
+        val liveTurns = finishLive(meetingId)
+        val outcome = when {
+            liveTurns != null -> {
+                repo.update(meetingId) { m ->
+                    val result = SpeakerAssigner.applyTurns(m.segments, liveTurns, random)
+                    m.copy(speakers = result.speakers, segments = result.segments, speakersFinal = true)
+                }
+                Detection.DONE
+            }
+            audioFile != null && settings().finalDiarizationPass -> tryFullDiarization(meetingId, audioFile, durationMs)
+            else -> Detection.SKIPPED
+        }
+        if (!onDevice) {
+            if (outcome == Detection.DONE) {
+                // The whole recording was transcribed again, so the failed parts are covered.
+                repo.get(meetingId)?.pendingChunks?.forEach { deleteQuietly(it.path) }
+                repo.update(meetingId) { it.copy(pendingChunks = emptyList()) }
+            } else {
+                retryPendingChunks(meetingId)
+            }
         }
         // When on-device detection ran and failed, say why rather than fall back to the much slower AI.
-        analyze(meetingId, aiSeparation = outcome != Detection.FAILED)
+        analyze(meetingId, aiSeparation = outcome != Detection.FAILED, fromNotes = true)
     }
 
     /** Transcribes an audio file the user imported. */
@@ -286,7 +447,7 @@ class MeetingPipeline(
      * Speaker separation, naming and insight generation according to settings. [aiSeparation] false
      * skips separating speakers with the AI (because on-device detection already failed and said why).
      */
-    suspend fun analyze(meetingId: String, aiSeparation: Boolean = true) {
+    suspend fun analyze(meetingId: String, aiSeparation: Boolean = true, fromNotes: Boolean = false) {
         val s = settings()
         val meeting = repo.get(meetingId) ?: return
         if (meeting.segments.isEmpty()) {
@@ -314,9 +475,10 @@ class MeetingPipeline(
         // Names, summary and gaps only read the transcript, so they run side by side.
         val aiSteps = buildList {
             if (s.suggestSpeakerNames) add("Speaker names" to suspend { suggestSpeakerNames(meetingId) })
+            if (Prompts.glossaryTerms(s.glossary).isNotEmpty()) add("Glossary fixes" to suspend { applyGlossary(meetingId) })
             if (s.autoAnalyze) {
-                add("Summary" to suspend { generateInsights(meetingId) })
-                add("Gaps & questions" to suspend { generateGaps(meetingId) })
+                add("Summary" to suspend { generateInsights(meetingId, fromNotes) })
+                add("Gaps & questions" to suspend { generateGaps(meetingId, fromNotes) })
             }
         }
         if (aiSteps.isNotEmpty()) {
@@ -529,9 +691,10 @@ class MeetingPipeline(
         }
     }
 
-    suspend fun generateInsights(meetingId: String) {
+    /** [fromNotes] lets the summary start from the notes written during the meeting, which is faster. */
+    suspend fun generateInsights(meetingId: String, fromNotes: Boolean = false) {
         val meeting = repo.get(meetingId) ?: return
-        val fresh = meetingAi.insights(meeting)
+        val fresh = meetingAi.insights(meeting, fromNotes)
         repo.update(meetingId) {
             // Keep ticked-off and edited action items when the summary is regenerated.
             val insights = fresh.copy(actionItems = ActionItems.carryOver(it.insights?.actionItems.orEmpty(), fresh.actionItems))
@@ -542,10 +705,29 @@ class MeetingPipeline(
         }
     }
 
-    suspend fun generateGaps(meetingId: String) {
+    suspend fun generateGaps(meetingId: String, fromNotes: Boolean = false) {
         val meeting = repo.get(meetingId) ?: return
-        val gaps = meetingAi.gaps(meeting)
+        val gaps = meetingAi.gaps(meeting, fromNotes)
         repo.update(meetingId) { it.copy(gaps = gaps) }
+    }
+
+    /**
+     * Corrects misheard glossary terms (names, products, jargon) throughout the transcript. Returns
+     * how many lines changed.
+     */
+    suspend fun applyGlossary(meetingId: String): Int {
+        val meeting = repo.get(meetingId) ?: return 0
+        val fixes = meetingAi.glossaryFixes(meeting)
+        if (fixes.isEmpty()) return 0
+        var changed = 0
+        repo.update(meetingId) { m ->
+            m.copy(segments = m.segments.map { seg ->
+                val fixed = Glossary.apply(seg.text, fixes)
+                if (fixed == seg.text) seg else seg.copy(text = fixed, words = null).also { changed++ }
+            })
+        }
+        log("Glossary fixed $changed line(s)")
+        return changed
     }
 
     /** Re-runs the summary using the user's answers to follow-up questions. */
@@ -590,6 +772,11 @@ class MeetingPipeline(
     }
 
     private companion object {
+        /** Length of the blocks diarized during recording. */
+        const val LIVE_BLOCK_MS = 10 * 60_000L
+        /** Length of the stretches summarised during recording. */
+        const val LIVE_NOTES_MS = 10 * 60_000L
+
         const val MIN_VOICEPRINT_SEGMENT_MS = 1_000L
         const val MAX_VOICEPRINT_MS = 45_000L
     }

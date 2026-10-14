@@ -115,6 +115,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             item { LocalSpeechSection(settings, modelStates, vm) }
             item { VoiceMemorySection(settings, modelStates, vm) }
             item { ReminderSection(settings, vm) }
+            item { GlossarySection(settings, vm) }
             item {
                 Column {
                     Text("Providers & API keys", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
@@ -313,6 +314,38 @@ private fun VoiceMemorySection(settings: AppSettings, states: Map<String, ModelS
                 }
                 IconButton(onClick = { vm.deleteVoice(voice.id) }) { Icon(Icons.Filled.Delete, contentDescription = "Forget ${voice.name}") }
             }
+        }
+    }
+}
+
+@Composable
+private fun GlossarySection(settings: AppSettings, vm: SettingsViewModel) {
+    var text by remember { mutableStateOf(settings.glossary) }
+    val people = remember { vm.knownPeople() }
+    SectionCard("Glossary") {
+        Text(
+            "Names, products and jargon that speech recognition gets wrong, one per line (for example \"Priya Sharma — product lead\"). " +
+                "The AI spells them correctly in summaries and answers, and fixes them in the transcript after each meeting.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = text,
+            onValueChange = { value ->
+                text = value
+                vm.update { it.copy(glossary = value) }
+            },
+            placeholder = { Text("Priya Sharma\nKaliScriber\nOKR") },
+            minLines = 3,
+            maxLines = 10,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        val missing = people.filter { name -> text.lines().none { it.trim().startsWith(name, ignoreCase = true) } }
+        if (missing.isNotEmpty()) {
+            TextButton(onClick = {
+                text = (text.trimEnd().lines().filter { it.isNotBlank() } + missing).joinToString("\n")
+                vm.update { it.copy(glossary = text) }
+            }) { Text("Add ${missing.size} people from your meetings") }
         }
     }
 }
@@ -757,6 +790,11 @@ private fun ProcessingSettings(settings: AppSettings, vm: SettingsViewModel) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        ToggleRow(
+            "Write running notes during the meeting",
+            "Every ten minutes the AI notes what was said, so the summary of a long meeting is ready sooner",
+            settings.liveNotes,
+        ) { v -> vm.update { it.copy(liveNotes = v) } }
         ToggleRow(
             "Detect speakers over the whole meeting when it ends",
             "Re-transcribes the full recording with a speaker-aware model for consistent speakers.",

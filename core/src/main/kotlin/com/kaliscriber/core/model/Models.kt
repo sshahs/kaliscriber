@@ -1,6 +1,9 @@
 package com.kaliscriber.core.model
 
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNames
 
 @Serializable
 enum class MeetingStatus { RECORDING, TRANSCRIBING, ANALYZING, READY, ERROR }
@@ -23,6 +26,8 @@ data class Meeting(
     val chat: List<ChatMessage> = emptyList(),
     /** Chunks whose live transcription failed, kept so they can be retried. */
     val pendingChunks: List<AudioChunk> = emptyList(),
+    /** Notes written while the meeting was recorded, one per stretch of about ten minutes. */
+    val sections: List<MeetingSection> = emptyList(),
     /** True once speakers come from a diarization pass over the whole meeting. */
     val speakersFinal: Boolean = false,
     val lastError: String? = null,
@@ -37,6 +42,15 @@ data class Meeting(
 ) {
     fun speaker(id: String?): Speaker? = speakers.firstOrNull { it.id == id }
     val plainTranscript: String get() = segments.joinToString(" ") { it.text }
+
+    /** The start of the transcript, for list previews (cheap even for long meetings). */
+    fun transcriptPreview(maxChars: Int = 300): String = buildString {
+        for (seg in segments) {
+            if (length >= maxChars) break
+            if (isNotEmpty()) append(' ')
+            append(seg.text)
+        }
+    }.take(maxChars)
 }
 
 /**
@@ -74,9 +88,13 @@ data class TranscriptSegment(
     val words: List<WordTiming>? = null,
 )
 
-/** When a recognized word starts (ms into the meeting) and its text. */
+/** When a recognized word starts (ms into the meeting) and its text. Stored with short keys: there are thousands per meeting. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-data class WordTiming(val startMs: Long, val text: String)
+data class WordTiming(
+    @SerialName("s") @JsonNames("startMs") val startMs: Long,
+    @SerialName("t") @JsonNames("text") val text: String,
+)
 
 /** A short spoken recap of the meeting, and the audio file it was rendered to. */
 @Serializable
@@ -164,6 +182,10 @@ data class ChatMessage(
     val excerpt: ExcerptRef? = null,
     val isError: Boolean = false,
 )
+
+/** AI notes on one stretch of a meeting, written while it was being recorded. */
+@Serializable
+data class MeetingSection(val startMs: Long, val endMs: Long, val notes: String)
 
 /** A message in the "Ask across all meetings" conversation. */
 @Serializable

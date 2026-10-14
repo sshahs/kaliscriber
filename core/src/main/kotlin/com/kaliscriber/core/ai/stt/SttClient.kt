@@ -68,6 +68,21 @@ interface SpeakerDiarizer {
     val diarizationAvailable: Boolean
     /** [onProgress] reports 0..1 while the (possibly long) pass runs. */
     suspend fun diarize(audio: File, speakers: Int? = null, onProgress: (Float) -> Unit = {}): List<SpeakerTurn>
+
+    /**
+     * Diarizes one stretch of a meeting while it is still being recorded: [audio] holds consecutive
+     * recording chunks starting [offsetMs] into the meeting. Blocks are joined with
+     * [com.kaliscriber.core.speakers.BlockMerge] when the meeting ends. Null when not supported.
+     */
+    suspend fun diarizeBlock(audio: List<File>, offsetMs: Long): DiarizedBlock? = null
+}
+
+/**
+ * Speakers found in one block of a meeting: turns labelled with block-local speaker ids, and a
+ * voiceprint per speaker (with how many seconds they spoke) for matching them across blocks.
+ */
+class DiarizedBlock(val turns: List<SpeakerTurn>, val voices: Map<String, Voice>) {
+    class Voice(val embedding: FloatArray, val seconds: Double)
 }
 
 /**

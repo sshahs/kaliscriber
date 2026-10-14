@@ -44,10 +44,10 @@ class MeetingPipelineTest {
 
     private fun llm() = FakeLlm { req: LlmRequest ->
         when {
-            req.system.startsWith("You are KaliScriber, an expert meeting analyst") -> insightsJson
-            req.system.startsWith("You review meeting transcripts") -> gapsJson
-            req.system == Prompts.SPEAKER_NAMES_SYSTEM -> {
-                val placeholder = Regex("Placeholder speakers to identify: ([^,\\n]+)").find(req.messages.last().content)!!.groupValues[1]
+            req.system.contains(Prompts.TASK_INSIGHTS) -> insightsJson
+            req.system.contains(Prompts.TASK_GAPS) -> gapsJson
+            req.system.contains(Prompts.TASK_NAMES) -> {
+                val placeholder = Regex("could not identify them: ([^,.\\n]+)").find(req.system)!!.groupValues[1]
                 """{"speakers":[{"placeholder":"$placeholder","name":"Priya","confidence":0.9,"reason":"Introduced herself at 00:00"}]}"""
             }
             req.system == Prompts.SEPARATE_SPEAKERS_SYSTEM ->
@@ -239,7 +239,7 @@ class MeetingPipelineTest {
         val questions = repo.get(meeting.id)!!.gaps!!.questions
         assertEquals(1, questions.size, "the same question is not asked again")
         assertEquals("50k", questions.single().answer)
-        assertTrue(fakeLlm.requests.any { it.messages.last().content.contains("A: 50k") })
+        assertTrue(fakeLlm.requests.any { it.system.contains("A: 50k") })
     }
 
     @Test
@@ -400,7 +400,7 @@ class MeetingPipelineTest {
 
         p.generateBriefingScript(meeting.id)
         assertEquals("The launch is on 3 Nov [00:05].", repo.get(meeting.id)!!.briefing!!.script)
-        assertTrue(fakeLlm.requests.last().system.contains("audio briefings"))
+        assertTrue(fakeLlm.requests.last().system.contains(Prompts.TASK_BRIEFING))
 
         p.ask(meeting.id, "When?", spoken = true)
         assertTrue(fakeLlm.requests.last().system.contains(Prompts.SPOKEN_ANSWER_RULE))

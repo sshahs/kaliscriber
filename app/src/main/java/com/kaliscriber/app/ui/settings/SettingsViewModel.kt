@@ -61,6 +61,10 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.models.refresh() }
     }
 
+    /** Names of people identified in meetings, for adding to the glossary. */
+    fun knownPeople(): List<String> = com.kaliscriber.core.people.People.directory(container.meetings.all(), container.voices.profiles.value)
+        .map { it.name }
+
     /** Text-to-speech engines installed on the phone, as (package, name). */
     fun ttsEngines(): List<Pair<String, String>> = container.speech.installedEngines()
 

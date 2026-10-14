@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -69,6 +70,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.app.ui.common.EmptyState
+import com.kaliscriber.app.ui.people.PeopleTab
 import com.kaliscriber.app.ui.tasks.TasksTab
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
@@ -89,6 +91,7 @@ fun HomeScreen(
     onOpenMeetingAt: (meetingId: String, segmentId: String?) -> Unit = { id, _ -> onOpenMeeting(id) },
     /** Opens "Ask all meetings", optionally asking [question] straight away. */
     onAskAll: (question: String?) -> Unit = {},
+    onOpenPerson: (String) -> Unit = {},
     startTab: Int = 0,
 ) {
     val vm = appViewModel { HomeViewModel(it) }
@@ -98,7 +101,7 @@ fun HomeScreen(
     val query by vm.query.collectAsStateWithLifecycle()
     val recording by vm.recording.collectAsStateWithLifecycle()
     val needsSetup by vm.needsSetup.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableIntStateOf(startTab.coerceIn(0, 2)) }
+    var tab by rememberSaveable { mutableIntStateOf(startTab.coerceIn(0, 3)) }
     var confirmDelete by remember { mutableStateOf<(() -> Unit)?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -152,8 +155,8 @@ fun HomeScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
-            if (tab == 2) {
-                // The task list has no create action; items come from meeting summaries.
+            if (tab >= 2) {
+                // Tasks and People have no create action; they come from meeting summaries.
             } else if (tab == 0) {
                 ExtendedFloatingActionButton(
                     onClick = ::requestRecording,
@@ -174,9 +177,12 @@ fun HomeScreen(
                 Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Meetings") }, icon = { Icon(Icons.Filled.Groups, null) })
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Notes") }, icon = { Icon(Icons.Filled.EditNote, null) })
                 Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Tasks") }, icon = { Icon(Icons.Filled.TaskAlt, null) })
+                Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("People") }, icon = { Icon(Icons.Filled.Person, null) })
             }
             if (tab == 2) {
                 TasksTab(onOpenMeeting = onOpenMeeting, modifier = Modifier.weight(1f))
+            } else if (tab == 3) {
+                PeopleTab(onOpenPerson = onOpenPerson, modifier = Modifier.weight(1f))
             } else {
                 OutlinedTextField(
                     value = query,
@@ -307,7 +313,7 @@ private fun MeetingRow(meeting: Meeting, onClick: () -> Unit, onDelete: () -> Un
                     meeting.insights?.actionItems?.count { !it.done }?.takeIf { it > 0 }?.let { add("$it open tasks") }
                 }.joinToString(" · ")
                 Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                val preview = meeting.insights?.summary?.takeIf { it.isNotBlank() } ?: meeting.plainTranscript
+                val preview = meeting.insights?.summary?.takeIf { it.isNotBlank() } ?: meeting.transcriptPreview()
                 if (preview.isNotBlank()) {
                     Text(preview, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }

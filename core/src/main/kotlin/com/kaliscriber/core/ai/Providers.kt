@@ -172,11 +172,21 @@ data class AppSettings(
     val suggestSpeakerNames: Boolean = true,
     /** Remember voices across meetings (voiceprints stay on the device). */
     val rememberVoices: Boolean = true,
+    /**
+     * Write short notes every ten minutes while recording, so the summary after a long meeting
+     * starts from them and is ready sooner.
+     */
+    val liveNotes: Boolean = true,
     /** Generate summary, insights, gaps and questions automatically after a meeting. */
     val autoAnalyze: Boolean = true,
     /** Rough cap on transcript characters sent to the LLM in one request. */
     val maxTranscriptChars: Int = 400_000,
     val export: ExportSettings = ExportSettings(),
+    /**
+     * Names and terms the AI should spell correctly, one per line (e.g. "Priya Sharma — product lead").
+     * Added to every meeting request and used to fix misheard words in transcripts.
+     */
+    val glossary: String = "",
     /** Daily notification listing overdue action items and those due that day. */
     val taskReminders: Boolean = true,
     /** Hour of the day (0-23) the reminder is shown. */

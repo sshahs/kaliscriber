@@ -19,6 +19,11 @@ data class LlmRequest(
      * hits its own limit. Bounds how long a request can run if a model starts repeating itself.
      */
     val outputLimit: Int? = null,
+    /**
+     * The start of [system] that stays the same across requests (the meeting and its rules), for
+     * providers that need an explicit cache marker. Others cache identical prefixes on their own.
+     */
+    val cachePrefix: String? = null,
 )
 
 interface LlmClient {

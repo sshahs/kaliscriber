@@ -68,7 +68,7 @@ class LibraryAsk(
             LlmMessage(if (it.role == ChatRole.USER) LlmRole.USER else LlmRole.ASSISTANT, it.content)
         } + LlmMessage(LlmRole.USER, question)
         val text = ai.chat().complete(
-            LlmRequest(system = Prompts.libraryAskSystem(context, clock.now(), settings().outputLanguage), messages = turns),
+            LlmRequest(system = Prompts.libraryAskSystem(context, clock.now(), settings().outputLanguage, settings().glossary), messages = turns),
         ).trim()
         val cited = citedSources(text, sources)
         val shown = cited.ifEmpty { sources.take(3).map { AskSource(it.meeting.id, it.meeting.title, label = it.label) } }

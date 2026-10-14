@@ -173,6 +173,7 @@ fun MeetingScreen(
                         DropdownMenuItem(text = { Text("Regenerate summary") }, onClick = { menuOpen = false; vm.generateInsights() })
                         DropdownMenuItem(text = { Text("Regenerate gaps & questions") }, onClick = { menuOpen = false; vm.generateGaps() })
                         DropdownMenuItem(text = { Text("Re-detect speakers with AI") }, onClick = { menuOpen = false; vm.separateSpeakers() })
+                        DropdownMenuItem(text = { Text("Fix words from glossary") }, onClick = { menuOpen = false; vm.applyGlossary() })
                         DropdownMenuItem(text = { Text("Suggest speaker names") }, onClick = { menuOpen = false; vm.suggestNames() })
                         DropdownMenuItem(text = { Text("Save as note") }, onClick = {
                             menuOpen = false

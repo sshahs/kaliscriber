@@ -17,14 +17,64 @@ object Prompts {
     private const val PLACEHOLDER_RULE =
         "Speakers listed as unidentified have random placeholder names (like \"Amber Falcon\"); refer to them by that name and never invent their real name."
 
-    fun insightsSystem(outputLanguage: String) = """
-        You are KaliScriber, an expert meeting analyst and note taker. You turn meeting transcripts into accurate, useful notes.
-        Rules:
-        - Use only information in the transcript and the user's clarifications. Never invent facts, names, dates or numbers.
-        - $PLACEHOLDER_RULE
-        - Timestamps are [mm:ss] or [h:mm:ss] from the start of the meeting.
-        - ${languageRule(outputLanguage)}
-        Return ONLY a JSON object with this shape:
+    /**
+     * The shared opening of every request about one meeting: general rules, the glossary and the
+     * meeting itself. It is identical across the summary, gaps, names, Ask and briefing requests
+     * (only the task that follows differs), so providers can cache it and later requests start faster.
+     */
+    fun meetingSystem(meeting: Meeting, transcript: String, outputLanguage: String, glossary: String) = buildString {
+        appendLine("You are KaliScriber, an expert meeting assistant and note taker. The meeting below was transcribed by speech recognition, so some words, names and terms may be misheard.")
+        appendLine("General rules:")
+        appendLine("- Base everything on the meeting and the user's clarifications unless your task says otherwise. Never invent facts, names, dates or numbers.")
+        appendLine("- $PLACEHOLDER_RULE")
+        appendLine("- Timestamps are [mm:ss] or [h:mm:ss] from the start of the meeting.")
+        appendLine("- ${languageRule(outputLanguage)}")
+        glossaryBlock(glossary)?.let {
+            appendLine()
+            append(it)
+        }
+        appendLine()
+        append(meetingContext(meeting, transcript))
+    }
+
+    /** The user's glossary as a prompt block, or null when it is empty. */
+    fun glossaryBlock(glossary: String): String? {
+        val terms = glossaryTerms(glossary)
+        if (terms.isEmpty()) return null
+        return buildString {
+            appendLine("<glossary>")
+            appendLine("Correct spellings of names and terms the user uses. The transcript may have misheard them; always write them as spelled here:")
+            terms.forEach { appendLine("- $it") }
+            appendLine("</glossary>")
+        }
+    }
+
+    /** One glossary entry per non-empty line (e.g. "Priya Sharma — product lead"). */
+    fun glossaryTerms(glossary: String): List<String> = glossary.lines().map { it.trim() }.filter { it.isNotEmpty() }.take(200)
+
+    /** For running notes written every ten minutes or so while a meeting is recorded. */
+    fun sectionNotesSystem(outputLanguage: String, glossary: String) = buildString {
+        appendLine("You take running notes during a live meeting. Summarise the part of the transcript you are given as compact Markdown notes that will later be used to write the meeting summary:")
+        appendLine("- topics discussed, with the key facts, numbers and names")
+        appendLine("- decisions made")
+        appendLine("- action items, with owner and deadline when stated")
+        appendLine("- open questions, risks and concerns")
+        appendLine("- notable quotes with their [mm:ss] timestamps")
+        appendLine("Speaker labels are not reliable yet: attribute things only to people named in the speech, never to the speaker labels.")
+        appendLine("Keep every fact, number and name; no filler. At most 250 words. ${languageRule(outputLanguage)}")
+        glossaryBlock(glossary)?.let { append(it) }
+    }
+
+    const val TASK_INSIGHTS = "# Task: meeting notes"
+    const val TASK_GAPS = "# Task: gaps and questions"
+    const val TASK_NAMES = "# Task: identify speakers"
+    const val TASK_ANSWER = "# Task: answer questions"
+    const val TASK_BRIEFING = "# Task: audio briefing"
+    const val TASK_GLOSSARY = "# Task: fix misheard terms"
+
+    val INSIGHTS_TASK = """
+        $TASK_INSIGHTS
+        Turn the meeting into accurate, useful notes. Return ONLY a JSON object with this shape:
         {
           "title": "short descriptive meeting title, at most 8 words",
           "summary": "3-6 sentence executive summary",
@@ -40,9 +90,9 @@ object Prompts {
         Use empty arrays when nothing applies.
     """.trimIndent()
 
-    fun gapsSystem(outputLanguage: String) = """
-        You review meeting transcripts to find what is missing, unclear or unresolved, then write questions that the user (the participant who recorded the meeting) can answer to fill those gaps.
-        Look for:
+    val GAPS_TASK = """
+        $TASK_GAPS
+        Find what is missing, unclear or unresolved in the meeting, then write questions that the user (the participant who recorded it) can answer to fill those gaps. Look for:
         - action items without an owner or a deadline
         - decisions that were discussed but not actually made
         - vague references ("that issue", "the numbers from last week") that a reader who was absent could not follow
@@ -50,8 +100,6 @@ object Prompts {
         - questions raised in the meeting that were never answered
         - garbled or inaudible parts of the transcript
         - unidentified speakers whose identity matters
-        $PLACEHOLDER_RULE
-        ${languageRule(outputLanguage)}
         Return ONLY a JSON object:
         {
           "gaps": [{"title": "short label", "detail": "what is missing and where, citing timestamps", "suggestion": "how to close the gap"}],
@@ -60,20 +108,43 @@ object Prompts {
         Ask at most 8 questions, most important first. Do not ask about anything the user has already answered.
     """.trimIndent()
 
-    fun askSystem(meeting: Meeting, transcript: String, outputLanguage: String) = buildString {
-        appendLine("You are KaliScriber's meeting assistant. Answer the user's questions about the meeting below, using the transcript as the source of truth.")
-        appendLine("- Cite timestamps like [12:34] when you refer to specific moments.")
-        appendLine("- If the transcript does not answer the question, say so plainly, then give your best inference clearly labelled as an inference.")
-        appendLine("- When asked to fill gaps or draft something (an email, follow-ups, a plan), you may go beyond the transcript but say which parts are your suggestions.")
-        appendLine("- Be concise. Markdown is supported.")
-        appendLine("- $PLACEHOLDER_RULE")
-        appendLine("- ${languageRule(outputLanguage)}")
-        appendLine()
-        append(meetingContext(meeting, transcript))
-    }
+    val ANSWER_TASK = """
+        $TASK_ANSWER
+        Answer the user's questions about the meeting, using it as the source of truth.
+        - Cite timestamps like [12:34] when you refer to specific moments.
+        - If the meeting does not answer the question, say so plainly, then give your best inference clearly labelled as an inference.
+        - When asked to fill gaps or draft something (an email, follow-ups, a plan), you may go beyond the meeting but say which parts are your suggestions.
+        - Be concise. Markdown is supported.
+    """.trimIndent()
+
+    val BRIEFING_TASK = """
+        $TASK_BRIEFING
+        Write an audio briefing: a spoken catch-up on the meeting for someone who missed it, read aloud by a text-to-speech voice.
+        - 150 to 300 words, about one to two minutes when spoken.
+        - Plain flowing sentences only: no Markdown, bullet points, headings, emoji or timestamps.
+        - Open with what the meeting was about in one sentence, then the key decisions, who owns which next steps (with deadlines), and anything unresolved.
+        - Use people's names when known. Unidentified speakers have placeholder names; call them "one participant" instead.
+        Reply with the script only.
+    """.trimIndent()
+
+    fun namesTask(placeholders: List<String>) = """
+        $TASK_NAMES
+        Some speakers have random placeholder names because the app could not identify them: ${placeholders.joinToString()}.
+        Using only evidence in the meeting (self-introductions, being addressed by name such as "Thanks, Priya", or a stated role), suggest the real name of each placeholder speaker. Do not guess without evidence; omit speakers you cannot identify.
+        Return ONLY a JSON object:
+        {"speakers": [{"placeholder": "Amber Falcon", "name": "Priya", "confidence": 0.9, "reason": "short evidence with a timestamp"}]}
+    """.trimIndent()
+
+    val GLOSSARY_TASK = """
+        $TASK_GLOSSARY
+        Find words in the transcript that speech recognition misheard and that should be one of the glossary terms (for example "pre a" for "Priya", or "cali scribe" for "KaliScriber").
+        Return ONLY a JSON object listing each misheard phrase exactly as it appears in the transcript and its correction:
+        {"fixes": [{"from": "pre a", "to": "Priya"}]}
+        Only include confident fixes to glossary terms. Use an empty array when there are none.
+    """.trimIndent()
 
     /** For "Ask across all meetings": [context] holds labelled meeting excerpts from [MeetingSearch]. */
-    fun libraryAskSystem(context: String, today: Long, outputLanguage: String) = buildString {
+    fun libraryAskSystem(context: String, today: Long, outputLanguage: String, glossary: String = "") = buildString {
         appendLine("You are KaliScriber's assistant. Answer the user's question using their recorded meetings, excerpts of which are below. Today is ${formatDate(today)}.")
         appendLine("- Each meeting is labelled [M1], [M2]… with its date. Cite the meeting and moment after each claim, like [M2 12:34], or [M2] for something from its summary.")
         appendLine("- Use only what the excerpts say. If they don't answer the question, say so and suggest what to search for instead.")
@@ -81,6 +152,7 @@ object Prompts {
         appendLine("- Be concise. Markdown is supported.")
         appendLine("- $PLACEHOLDER_RULE")
         appendLine("- ${languageRule(outputLanguage)}")
+        glossaryBlock(glossary)?.let { append(it) }
         appendLine()
         appendLine("<meetings>")
         appendLine(context)
@@ -134,11 +206,6 @@ object Prompts {
         }
     }
 
-    const val SPEAKER_NAMES_SYSTEM = """You identify people in meeting transcripts. Some speakers have random placeholder names (like "Amber Falcon") because the app could not identify them.
-Using only evidence in the transcript (self-introductions, being addressed by name such as "Thanks, Priya", or a stated role), suggest the real name of each placeholder speaker. Do not guess without evidence; omit speakers you cannot identify.
-Return ONLY a JSON object:
-{"speakers": [{"placeholder": "Amber Falcon", "name": "Priya", "confidence": 0.9, "reason": "short evidence with a timestamp"}]}"""
-
     const val SEPARATE_SPEAKERS_SYSTEM = """You are diarizing a meeting transcript that has no reliable speaker labels. Each input line is one segment: "<index>| text". A segment may contain more than one speaker.
 Work out who said what from turn-taking cues: questions and answers, greetings, people addressing each other, "I"/"you" references, changes of topic or style.
 Label speakers S1, S2, S3... in order of first appearance, reusing the labels already established when they are given. Use "?" only when you genuinely cannot tell.
@@ -146,17 +213,6 @@ Return ONLY a compact JSON object. Give every segment index with its speaker. Do
 {"turns": [{"i": 0, "s": "S1"}, {"i": 1, "s": "S2"}, {"i": 1, "s": "S1", "from": "Sure, I can take"}]}"""
 
     const val SPOKEN_ANSWER_RULE = """The user is talking to you by voice and will hear your answer read aloud. Reply in two to four short, natural spoken sentences. No Markdown, lists, headings or symbols. Say times like "about twelve minutes in" rather than citing [12:34]."""
-
-    fun briefingSystem(outputLanguage: String) = """
-        You write audio briefings: a spoken catch-up on a meeting for someone who missed it, read aloud by a text-to-speech voice.
-        - 150 to 300 words, about one to two minutes when spoken.
-        - Plain flowing sentences only: no Markdown, bullet points, headings, emoji or timestamps.
-        - Open with what the meeting was about in one sentence, then the key decisions, who owns which next steps (with deadlines), and anything unresolved.
-        - Use people's names when known. Unidentified speakers have placeholder names; call them "one participant" instead.
-        - Never invent facts.
-        - ${languageRule(outputLanguage)}
-        Reply with the script only.
-    """.trimIndent()
 
     fun noteSystem(outputLanguage: String) = """
         You are KaliScriber, an AI note-taking assistant. You work on the user's notes, which may be typed or dictated (and so contain transcription errors).

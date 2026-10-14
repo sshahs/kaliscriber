@@ -86,7 +86,7 @@ class AppContainer(context: Context) {
     val speech = SpeechOutput(appContext, ai, settings)
 
     val meetings = MeetingRepository(
-        JsonDocumentStore(File(filesDir, "meetings"), Meeting.serializer()) { it.id },
+        JsonDocumentStore(File(filesDir, "meetings"), Meeting.serializer(), idOf = { it.id }, persisted = MeetingRepository.PERSISTED),
         audioRoot = File(filesDir, "audio"),
     )
     val notes = NoteRepository(JsonDocumentStore(File(filesDir, "notes"), Note.serializer()) { it.id })
@@ -100,6 +100,7 @@ class AppContainer(context: Context) {
         embedder = { localSpeech },
         log = { message -> Log.i("KaliScriber", message) },
         fetchDiarizationModels = { onProgress -> models.awaitDiarization(onProgress) },
+        liveScope = scope,
     )
     val exporter = MeetingExporter(appContext, http, secrets, settings)
     /** Long jobs started from a meeting screen, kept running in the background. */

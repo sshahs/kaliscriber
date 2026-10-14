@@ -13,6 +13,8 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - **Search all meetings:** the search box on the home screen looks through titles, people, summaries, action items and every transcript line, with word forms matched ("price" finds "pricing"). Tap a result to open the transcript at that line.
 - **Ask all meetings:** ask a question about everything you've recorded ("What did we decide about pricing last month?"). The app finds the relevant meetings and passages, the AI answers from them, and each answer lists its sources. Tap a source to jump to that moment.
 - **Tasks:** every action item from every meeting in one list, grouped into overdue, due today, next 7 days, later and no date. Filter by person, tick items off, or edit the task, owner and due date. Edits and ticks are kept when a summary is regenerated. An optional daily reminder (Settings → Action item reminders) lists what's overdue or due that day.
+- **People:** a page per person from your meetings (named speakers, action item owners and saved voices), with their open tasks, notable quotes, the meetings they were in and how long they spoke, plus one tap to ask the AI about them. First names are matched to full names ("Priya" → "Priya Sharma").
+- **Glossary:** names, products and jargon that speech recognition gets wrong (Settings → Glossary, one per line). The AI spells them correctly in summaries and answers, and after each meeting it fixes misheard versions in the transcript (also available from a meeting's menu).
 - **Gaps & questions:** the AI finds what's missing (tasks without owners or deadlines, vague references, unanswered questions…) and asks *you* questions. Your answers are stored with the meeting and fed back into the summary and Ask AI.
 - Play the recording with the transcript following along, edit lines, import existing audio files, share as Markdown, or save as a note.
 
@@ -53,6 +55,16 @@ Transcription runs **on the phone** with [sherpa-onnx](https://github.com/k2-fsa
 Silero VAD (1 MB) splits audio into utterances. The **speaker detection pack** (pyannote segmentation plus a 3D-Speaker embedding model, 45 MB) tells voices apart on-device when a meeting ends. It downloads together with a speech model, or on demand when a meeting ends without it. Recordings are processed in 10-minute blocks; every speaker found gets a voiceprint, and voiceprints are merged across the meeting, which matches people between blocks and rejoins one person the diarizer split in two. Lines are split at the word where the speaker changes. Speaker detection and other long jobs run under a foreground service, so they finish with the app in the background.
 
 You can switch transcription to **ElevenLabs Scribe** (with speaker labels) or any of the cloud options below instead.
+
+## Speed
+
+Most of the work happens while you are still recording, so results arrive soon after you stop:
+
+- **Speaker detection during the meeting.** Each ten minutes of audio is diarized on the phone as soon as it is recorded; when you stop, only the last stretch is left, and the blocks are joined by voiceprint.
+- **Running notes.** Every ten minutes the AI writes short notes on what was said. The summary of a long meeting starts from those notes plus the last few minutes of transcript, so it is ready much sooner. (Regenerating the summary later reads the full transcript.)
+- **Prompt caching.** Every request about a meeting starts with the same text (rules, glossary, meeting), with the task last, so providers that cache prompts (DeepSeek, OpenAI, Gemini, and Claude with explicit cache markers) answer follow-up requests faster and cheaper.
+- **Light storage.** Progress updates stay in memory instead of rewriting the meeting file, files leave out default values and store word timings compactly, and meetings load in parallel at startup.
+- **Optimised release build** (R8).
 
 ## Supported AI services (BYOK)
 

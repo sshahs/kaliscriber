@@ -52,7 +52,11 @@ class MeetingRepository(
     }
 
     suspend fun update(id: String, transform: (Meeting) -> Meeting): Meeting? =
-        store.update(id) { transform(it).copy(updatedAt = clock.now()) }
+        store.update(id) { current ->
+            val next = transform(current)
+            // Progress-only changes stay in memory, so they don't count as an edit.
+            if (PERSISTED(next) == PERSISTED(current)) next else next.copy(updatedAt = clock.now())
+        }
 
     suspend fun delete(id: String) {
         store.delete(id)
@@ -151,6 +155,9 @@ class MeetingRepository(
     }
 
     companion object {
+        /** Processing progress lives in memory only, so progress updates don't rewrite the meeting file. */
+        val PERSISTED: (Meeting) -> Meeting = { it.copy(processingStep = null, processingProgress = null) }
+
         fun defaultTitle(millis: Long): String =
             "Meeting " + SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(millis))
     }

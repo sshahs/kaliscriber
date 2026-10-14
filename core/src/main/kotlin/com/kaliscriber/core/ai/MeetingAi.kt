@@ -68,12 +68,71 @@ class MeetingAi(
         return LlmJson.parseObject(text)
     }
 
-    suspend fun insights(meeting: Meeting): MeetingInsights {
-        requireTranscript(meeting)
-        val obj = json(
-            Prompts.insightsSystem(settings().outputLanguage),
-            Prompts.meetingContext(meeting, transcriptFor(meeting)) + "\nProduce the JSON now.",
+    /** The shared, cacheable start of every request about [meeting] (see [Prompts.meetingSystem]). */
+    private fun shared(meeting: Meeting, transcript: String = transcriptFor(meeting)): String =
+        Prompts.meetingSystem(meeting, transcript, settings().outputLanguage, settings().glossary)
+
+    /** Runs [task] on [meeting] and parses the JSON reply; the meeting text forms a cacheable prefix. */
+    private suspend fun meetingJson(meeting: Meeting, task: String, transcript: String = transcriptFor(meeting)): JsonObject {
+        val prefix = shared(meeting, transcript)
+        val text = ai.chat().complete(
+            LlmRequest(
+                system = prefix + "\n" + task,
+                messages = listOf(LlmMessage(LlmRole.USER, "Do the task now and reply with the JSON only.")),
+                jsonMode = true,
+                cachePrefix = prefix,
+            ),
         )
+        return LlmJson.parseObject(text)
+    }
+
+    /**
+     * What the summary and gaps read: normally the transcript. With [fromNotes], a long meeting that
+     * has notes written while it was recorded is read as those notes plus the transcript after the
+     * last one, which is much shorter, so the summary is ready sooner.
+     */
+    internal fun insightsSource(meeting: Meeting, fromNotes: Boolean): String {
+        val full = transcriptFor(meeting)
+        val sections = meeting.sections.sortedBy { it.startMs }
+        if (!fromNotes || sections.isEmpty()) return full
+        val coveredUntil = sections.last().endMs
+        val tail = meeting.segments.filter { it.startMs >= coveredUntil }
+        val text = buildString {
+            appendLine("Notes written while the meeting was recorded (speaker labels were not known yet):")
+            sections.forEach { section ->
+                appendLine("## [${TranscriptFormatter.timestamp(section.startMs)}–${TranscriptFormatter.timestamp(section.endMs)}]")
+                appendLine(section.notes.trim())
+            }
+            if (tail.isNotEmpty()) {
+                appendLine()
+                appendLine("Transcript from [${TranscriptFormatter.timestamp(coveredUntil)}] to the end:")
+                appendLine(TranscriptFormatter.forPrompt(meeting, tail))
+            }
+        }
+        // Only worth it when the notes are clearly shorter than the transcript itself.
+        return if (text.length < full.length * 0.6) text else full
+    }
+
+    /** Compact notes on one stretch of a meeting that is still being recorded. */
+    suspend fun sectionNotes(meeting: Meeting, part: List<TranscriptSegment>): String {
+        val user = buildString {
+            appendLine("Meeting: ${meeting.title}")
+            appendLine("<transcript_part>")
+            appendLine(TranscriptFormatter.forPrompt(meeting, part))
+            appendLine("</transcript_part>")
+        }
+        return ai.chat().complete(
+            LlmRequest(
+                system = Prompts.sectionNotesSystem(settings().outputLanguage, settings().glossary),
+                messages = listOf(LlmMessage(LlmRole.USER, user)),
+                outputLimit = 1_500,
+            ),
+        ).trim()
+    }
+
+    suspend fun insights(meeting: Meeting, fromNotes: Boolean = false): MeetingInsights {
+        requireTranscript(meeting)
+        val obj = meetingJson(meeting, Prompts.INSIGHTS_TASK, insightsSource(meeting, fromNotes))
         val previous = meeting.insights?.actionItems.orEmpty()
         return MeetingInsights(
             title = obj.str("title").orEmpty(),
@@ -111,12 +170,9 @@ class MeetingAi(
         )
     }
 
-    suspend fun gaps(meeting: Meeting): GapAnalysis {
+    suspend fun gaps(meeting: Meeting, fromNotes: Boolean = false): GapAnalysis {
         requireTranscript(meeting)
-        val obj = json(
-            Prompts.gapsSystem(settings().outputLanguage),
-            Prompts.meetingContext(meeting, transcriptFor(meeting)) + "\nProduce the JSON now.",
-        )
+        val obj = meetingJson(meeting, Prompts.GAPS_TASK, insightsSource(meeting, fromNotes))
         val answered = meeting.gaps?.questions.orEmpty().filter { !it.answer.isNullOrBlank() }
         val fresh = obj.list("questions").mapNotNull { el ->
             val q = el as? JsonObject
@@ -149,18 +205,21 @@ class MeetingAi(
         val messages = history.filterNot { it.isError }.takeLast(20).map {
             LlmMessage(if (it.role == ChatRole.USER) LlmRole.USER else LlmRole.ASSISTANT, it.content)
         } + LlmMessage(LlmRole.USER, if (excerpt != null) Prompts.excerptQuestion(meeting, excerpt, question) else question)
-        var system = Prompts.askSystem(meeting, transcriptFor(meeting), settings().outputLanguage)
-        if (spoken) system += "\n\n" + Prompts.SPOKEN_ANSWER_RULE
-        return ai.chat().complete(LlmRequest(system = system, messages = messages)).trim()
+        val prefix = shared(meeting)
+        var system = prefix + "\n" + Prompts.ANSWER_TASK
+        if (spoken) system += "\n" + Prompts.SPOKEN_ANSWER_RULE
+        return ai.chat().complete(LlmRequest(system = system, messages = messages, cachePrefix = prefix)).trim()
     }
 
     /** A natural, speakable recap of the meeting for an audio briefing. */
     suspend fun briefingScript(meeting: Meeting): String {
         requireTranscript(meeting)
+        val prefix = shared(meeting)
         return ai.chat().complete(
             LlmRequest(
-                system = Prompts.briefingSystem(settings().outputLanguage),
-                messages = listOf(LlmMessage(LlmRole.USER, Prompts.meetingContext(meeting, transcriptFor(meeting)) + "\nWrite the briefing now.")),
+                system = prefix + "\n" + Prompts.BRIEFING_TASK,
+                messages = listOf(LlmMessage(LlmRole.USER, "Write the briefing now.")),
+                cachePrefix = prefix,
             ),
         ).trim()
     }
@@ -168,11 +227,7 @@ class MeetingAi(
     suspend fun suggestNames(meeting: Meeting): List<NameSuggestion> {
         val placeholders = meeting.speakers.filter { it.isPlaceholder }
         if (placeholders.isEmpty() || meeting.segments.isEmpty()) return emptyList()
-        val obj = json(
-            Prompts.SPEAKER_NAMES_SYSTEM,
-            Prompts.meetingContext(meeting, transcriptFor(meeting)) +
-                "\nPlaceholder speakers to identify: ${placeholders.joinToString { it.name }}\nProduce the JSON now.",
-        )
+        val obj = meetingJson(meeting, Prompts.namesTask(placeholders.map { it.name }))
         return obj.list("speakers").mapNotNull { el ->
             val s = el as? JsonObject ?: return@mapNotNull null
             val placeholder = s.str("placeholder", "speaker") ?: return@mapNotNull null
@@ -180,6 +235,21 @@ class MeetingAi(
                 ?: return@mapNotNull null
             val speaker = placeholders.firstOrNull { it.name.equals(placeholder, ignoreCase = true) } ?: return@mapNotNull null
             NameSuggestion(speaker.id, name, s.number("confidence") ?: 0.5, s.str("reason", "evidence").orEmpty())
+        }
+    }
+
+    /**
+     * Misheard glossary terms in the transcript, as (exact text in the transcript, correction) pairs.
+     * Empty when the glossary is empty.
+     */
+    suspend fun glossaryFixes(meeting: Meeting): List<Pair<String, String>> {
+        if (Prompts.glossaryTerms(settings().glossary).isEmpty() || meeting.segments.isEmpty()) return emptyList()
+        val obj = meetingJson(meeting, Prompts.GLOSSARY_TASK)
+        return obj.list("fixes", "corrections").mapNotNull { el ->
+            val f = el as? JsonObject ?: return@mapNotNull null
+            val from = f.str("from", "wrong")?.trim()?.takeIf { it.length >= 2 } ?: return@mapNotNull null
+            val to = f.str("to", "right", "correct")?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            if (from.equals(to, ignoreCase = false)) null else from to to
         }
     }
 
