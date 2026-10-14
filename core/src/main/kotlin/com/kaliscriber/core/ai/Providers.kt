@@ -1,0 +1,161 @@
+package com.kaliscriber.core.ai
+
+import kotlinx.serialization.Serializable
+
+/** Wire protocol a provider speaks. */
+enum class ApiKind { OPENAI_COMPATIBLE, ANTHROPIC, OLLAMA, DEEPGRAM, ASSEMBLYAI }
+
+/**
+ * Every AI service the app can talk to with the user's own key (BYOK).
+ * Base URLs, models and keys are all user editable; these are only defaults.
+ */
+@Serializable
+enum class ProviderId(
+    val displayName: String,
+    val kind: ApiKind,
+    val defaultBaseUrl: String,
+    val supportsChat: Boolean,
+    val supportsStt: Boolean,
+    val defaultChatModel: String = "",
+    val defaultSttModel: String = "",
+    val keyRequired: Boolean = true,
+    val keyUrl: String = "",
+    /** Whether the OpenAI-style `response_format: json_object` is understood. */
+    val supportsJsonMode: Boolean = false,
+    val maxUploadBytes: Long = 25L * 1024 * 1024,
+) {
+    OPENAI(
+        "OpenAI", ApiKind.OPENAI_COMPATIBLE, "https://api.openai.com/v1",
+        supportsChat = true, supportsStt = true,
+        defaultChatModel = "gpt-5-mini", defaultSttModel = "gpt-4o-transcribe-diarize",
+        keyUrl = "https://platform.openai.com/api-keys", supportsJsonMode = true,
+    ),
+    ANTHROPIC(
+        "Anthropic Claude", ApiKind.ANTHROPIC, "https://api.anthropic.com",
+        supportsChat = true, supportsStt = false,
+        defaultChatModel = "claude-sonnet-5-5",
+        keyUrl = "https://console.anthropic.com/settings/keys",
+    ),
+    GEMINI(
+        "Google Gemini", ApiKind.OPENAI_COMPATIBLE, "https://generativelanguage.googleapis.com/v1beta/openai",
+        supportsChat = true, supportsStt = false,
+        defaultChatModel = "gemini-2.5-flash",
+        keyUrl = "https://aistudio.google.com/apikey", supportsJsonMode = true,
+    ),
+    OLLAMA_CLOUD(
+        "Ollama Cloud", ApiKind.OLLAMA, "https://ollama.com",
+        supportsChat = true, supportsStt = false,
+        defaultChatModel = "gpt-oss:120b",
+        keyUrl = "https://ollama.com/settings/keys",
+    ),
+    GROQ(
+        "Groq", ApiKind.OPENAI_COMPATIBLE, "https://api.groq.com/openai/v1",
+        supportsChat = true, supportsStt = true,
+        defaultChatModel = "llama-3.3-70b-versatile", defaultSttModel = "whisper-large-v3-turbo",
+        keyUrl = "https://console.groq.com/keys", supportsJsonMode = true,
+    ),
+    OPENROUTER(
+        "OpenRouter", ApiKind.OPENAI_COMPATIBLE, "https://openrouter.ai/api/v1",
+        supportsChat = true, supportsStt = false,
+        defaultChatModel = "openai/gpt-5-mini",
+        keyUrl = "https://openrouter.ai/keys",
+    ),
+    MISTRAL(
+        "Mistral", ApiKind.OPENAI_COMPATIBLE, "https://api.mistral.ai/v1",
+        supportsChat = true, supportsStt = true,
+        defaultChatModel = "mistral-medium-latest", defaultSttModel = "voxtral-mini-latest",
+        keyUrl = "https://console.mistral.ai/api-keys", supportsJsonMode = true,
+    ),
+    DEEPSEEK(
+        "DeepSeek", ApiKind.OPENAI_COMPATIBLE, "https://api.deepseek.com/v1",
+        supportsChat = true, supportsStt = false,
+        defaultChatModel = "deepseek-chat",
+        keyUrl = "https://platform.deepseek.com/api_keys", supportsJsonMode = true,
+    ),
+    DEEPGRAM(
+        "Deepgram", ApiKind.DEEPGRAM, "https://api.deepgram.com",
+        supportsChat = false, supportsStt = true,
+        defaultSttModel = "nova-3",
+        keyUrl = "https://console.deepgram.com", maxUploadBytes = 2L * 1024 * 1024 * 1024,
+    ),
+    ASSEMBLYAI(
+        "AssemblyAI", ApiKind.ASSEMBLYAI, "https://api.assemblyai.com",
+        supportsChat = false, supportsStt = true,
+        defaultSttModel = "",
+        keyUrl = "https://www.assemblyai.com/app/api-keys", maxUploadBytes = 2L * 1024 * 1024 * 1024,
+    ),
+    CUSTOM_OPENAI(
+        "Custom (OpenAI-compatible)", ApiKind.OPENAI_COMPATIBLE, "https://example.com/v1",
+        supportsChat = true, supportsStt = true,
+        keyRequired = false,
+    );
+
+    companion object {
+        val chatProviders: List<ProviderId> get() = entries.filter { it.supportsChat }
+        val sttProviders: List<ProviderId> get() = entries.filter { it.supportsStt }
+    }
+}
+
+/** Non-secret, per-provider settings. API keys are stored separately (encrypted) by the app. */
+@Serializable
+data class ProviderSettings(
+    val baseUrl: String = "",
+    val chatModel: String = "",
+    val sttModel: String = "",
+)
+
+@Serializable
+data class AppSettings(
+    val chatProvider: ProviderId = ProviderId.OPENAI,
+    val sttProvider: ProviderId = ProviderId.OPENAI,
+    val providers: Map<ProviderId, ProviderSettings> = emptyMap(),
+    /** Length of each live transcription chunk while recording. */
+    val chunkSeconds: Int = 30,
+    /** ISO-639-1 hint for transcription, blank for auto-detect. */
+    val transcriptionLanguage: String = "",
+    /** Language for AI answers and summaries, blank to follow the meeting. */
+    val outputLanguage: String = "",
+    /** Re-transcribe the whole recording with diarization when the meeting ends. */
+    val finalDiarizationPass: Boolean = true,
+    /** Use the LLM to separate speakers when the transcription service cannot. */
+    val llmSpeakerSeparation: Boolean = true,
+    /** Ask the LLM to suggest real names for placeholder speakers. */
+    val suggestSpeakerNames: Boolean = true,
+    /** Generate summary, insights, gaps and questions automatically after a meeting. */
+    val autoAnalyze: Boolean = true,
+    /** Rough cap on transcript characters sent to the LLM in one request. */
+    val maxTranscriptChars: Int = 400_000,
+) {
+    fun settingsFor(id: ProviderId): ProviderSettings = providers[id] ?: ProviderSettings()
+
+    fun configFor(id: ProviderId, apiKey: String?): ProviderConfig {
+        val s = settingsFor(id)
+        return ProviderConfig(
+            id = id,
+            apiKey = apiKey?.trim().orEmpty(),
+            baseUrl = s.baseUrl.ifBlank { id.defaultBaseUrl }.trimEnd('/'),
+            chatModel = s.chatModel.ifBlank { id.defaultChatModel },
+            sttModel = s.sttModel.ifBlank { id.defaultSttModel },
+        )
+    }
+
+    fun withProvider(id: ProviderId, transform: (ProviderSettings) -> ProviderSettings): AppSettings =
+        copy(providers = providers + (id to transform(settingsFor(id))))
+}
+
+/** Fully resolved settings for one provider, including the key. */
+data class ProviderConfig(
+    val id: ProviderId,
+    val apiKey: String,
+    val baseUrl: String,
+    val chatModel: String,
+    val sttModel: String,
+) {
+    override fun toString(): String =
+        "ProviderConfig(id=$id, baseUrl=$baseUrl, chatModel=$chatModel, sttModel=$sttModel, apiKey=${if (apiKey.isBlank()) "<none>" else "<redacted>"})"
+}
+
+/** Supplies API keys, which the Android app keeps encrypted with the Android Keystore. */
+fun interface SecretProvider {
+    fun apiKey(id: ProviderId): String?
+}
