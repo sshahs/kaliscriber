@@ -1,0 +1,84 @@
+package com.kaliscriber.app.ui.home
+
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.kaliscriber.app.AppContainer
+import com.kaliscriber.app.recording.RecordingState
+import com.kaliscriber.core.model.Meeting
+import com.kaliscriber.core.model.MeetingStatus
+import com.kaliscriber.core.model.Note
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+class HomeViewModel(private val container: AppContainer) : ViewModel() {
+
+    val query = MutableStateFlow("")
+
+    val meetings: StateFlow<List<Meeting>> = combine(container.meetings.meetings, query) { list, q ->
+        if (q.isBlank()) list else list.filter { m ->
+            m.title.contains(q, true) ||
+                m.insights?.summary?.contains(q, true) == true ||
+                m.speakers.any { it.name.contains(q, true) } ||
+                m.segments.any { it.text.contains(q, true) }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val notes: StateFlow<List<Note>> = combine(container.notes.notes, query) { list, q ->
+        if (q.isBlank()) list else list.filter { it.title.contains(q, true) || it.content.contains(q, true) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val recording: StateFlow<RecordingState> = container.recorder.state
+
+    /** True when the selected chat or transcription provider still needs an API key. */
+    val needsSetup: StateFlow<Boolean> = combine(container.settingsStore.value, container.secrets.configured) { s, keys ->
+        (s.chatProvider.keyRequired && s.chatProvider !in keys) || (s.sttProvider.keyRequired && s.sttProvider !in keys)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    suspend fun startRecording(title: String?): Result<String> = runCatching { container.recorder.start(title) }
+
+    suspend fun createNote(): String = container.notes.create().id
+
+    fun deleteMeeting(id: String) = viewModelScope.launch { container.meetings.delete(id) }
+
+    fun deleteNote(id: String) = viewModelScope.launch { container.notes.delete(id) }
+
+    /** Copies the picked audio into app storage and transcribes it in the background. */
+    suspend fun importAudio(uri: Uri): Result<String> = runCatching {
+        val resolver = container.appContext.contentResolver
+        val name = withContext(Dispatchers.IO) {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        } ?: "Imported audio"
+        val meeting = container.meetings.create(name.substringBeforeLast('.'), status = MeetingStatus.TRANSCRIBING)
+        val extension = name.substringAfterLast('.', "m4a").lowercase().take(5)
+        val target = File(container.meetings.audioDir(meeting.id), "imported.$extension")
+        val durationMs = withContext(Dispatchers.IO) {
+            resolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+                ?: error("Could not read the selected file")
+            runCatching {
+                MediaMetadataRetriever().run {
+                    try {
+                        setDataSource(target.absolutePath)
+                        extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                    } finally {
+                        release()
+                    }
+                }
+            }.getOrNull()
+        }
+        if (durationMs != null) container.meetings.update(meeting.id) { it.copy(durationMs = durationMs) }
+        container.scope.launch { container.pipeline.processImportedAudio(meeting.id, target, durationMs) }
+        meeting.id
+    }
+}

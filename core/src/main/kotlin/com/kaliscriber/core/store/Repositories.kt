@@ -31,6 +31,8 @@ class MeetingRepository(
 
     fun get(id: String): Meeting? = store.get(id)
 
+    fun all(): List<Meeting> = store.items.value.values.sortedByDescending { it.createdAt }
+
     fun observe(id: String): Flow<Meeting?> = store.items.map { it[id] }.distinctUntilChanged()
 
     fun audioDir(id: String): File = File(audioRoot, id).apply { mkdirs() }

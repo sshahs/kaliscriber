@@ -1,0 +1,676 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+
+package com.kaliscriber.app.ui.meeting
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Subject
+import androidx.compose.material.icons.filled.TaskAlt
+import androidx.compose.material.icons.filled.Topic
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kaliscriber.app.ui.common.BulletList
+import com.kaliscriber.app.ui.common.EmptyState
+import com.kaliscriber.app.ui.common.MarkdownText
+import com.kaliscriber.app.ui.common.SectionCard
+import com.kaliscriber.app.ui.common.SpeakerBadge
+import com.kaliscriber.core.model.ChatRole
+import com.kaliscriber.core.model.Meeting
+import com.kaliscriber.core.model.MeetingStatus
+import com.kaliscriber.core.model.Speaker
+import com.kaliscriber.core.model.TranscriptSegment
+import com.kaliscriber.core.transcript.TranscriptFormatter
+
+/** Parses "mm:ss" or "h:mm:ss" (optionally in brackets) into milliseconds. */
+private fun parseTimestamp(text: String?): Long? {
+    val parts = text?.trim()?.trim('[', ']')?.split(":")?.map { it.trim().toLongOrNull() ?: return null } ?: return null
+    return when (parts.size) {
+        2 -> (parts[0] * 60 + parts[1]) * 1000
+        3 -> (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+        else -> null
+    }
+}
+
+private val Meeting.isProcessing get() = status == MeetingStatus.TRANSCRIBING || status == MeetingStatus.ANALYZING
+
+// ---------------------------------------------------------------------------------------------
+// Summary
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTranscriptAt: (Long) -> Unit) {
+    val insights = meeting.insights
+    if (insights == null) {
+        if (meeting.isProcessing || Busy.INSIGHTS in busy) {
+            EmptyState(Icons.Filled.AutoAwesome, "Working on it", "The summary, action items and highlights will appear here.") {
+                CircularProgressIndicator()
+            }
+        } else {
+            EmptyState(
+                Icons.Filled.AutoAwesome,
+                "No summary yet",
+                if (meeting.segments.isEmpty()) "There is no transcript to summarise yet." else "Generate a summary, action items, highlights and insights.",
+            ) {
+                Button(onClick = vm::generateInsights, enabled = meeting.segments.isNotEmpty()) { Text("Generate summary") }
+            }
+        }
+        return
+    }
+    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (Busy.INSIGHTS in busy) item { Text("Regenerating…", style = MaterialTheme.typography.bodySmall) }
+        if (insights.summary.isNotBlank()) {
+            item { SectionCard("Summary", Icons.Filled.Subject) { MarkdownText(insights.summary) } }
+        }
+        if (insights.actionItems.isNotEmpty()) {
+            item {
+                SectionCard("Action items", Icons.Filled.TaskAlt) {
+                    insights.actionItems.forEach { item ->
+                        Row(verticalAlignment = Alignment.Top) {
+                            Checkbox(checked = item.done, onCheckedChange = { vm.setActionDone(item.id, it) })
+                            Column(Modifier.padding(top = 12.dp)) {
+                                Text(
+                                    item.task,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textDecoration = if (item.done) TextDecoration.LineThrough else null,
+                                )
+                                val meta = listOfNotNull(
+                                    item.owner?.let { "👤 $it" },
+                                    item.dueDate?.let { "📅 $it" },
+                                    item.priority?.let { "⚑ $it" },
+                                ).joinToString("   ")
+                                if (meta.isNotEmpty()) {
+                                    Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (insights.keyPoints.isNotEmpty()) item { SectionCard("Key points", Icons.Filled.Lightbulb) { BulletList(insights.keyPoints) } }
+        if (insights.decisions.isNotEmpty()) item { SectionCard("Decisions", Icons.Filled.Gavel) { BulletList(insights.decisions) } }
+        if (insights.highlights.isNotEmpty()) {
+            item {
+                SectionCard("Highlights", Icons.Filled.Star) {
+                    insights.highlights.forEach { h ->
+                        val at = parseTimestamp(h.timestamp)
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .then(if (at != null) Modifier.clickable { onOpenTranscriptAt(at) } else Modifier)
+                                .padding(vertical = 4.dp),
+                        ) {
+                            Text("“${h.text}”", style = MaterialTheme.typography.bodyMedium)
+                            val who = listOfNotNull(h.speaker, h.timestamp?.let { "at $it" }).joinToString(" ")
+                            if (who.isNotEmpty()) Text("— $who", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            if (!h.why.isNullOrBlank()) Text(h.why!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+        if (insights.topics.isNotEmpty()) {
+            item {
+                SectionCard("Topics", Icons.Filled.Topic) {
+                    insights.topics.forEach { t ->
+                        Text(t.name, style = MaterialTheme.typography.titleSmall)
+                        if (t.summary.isNotBlank()) Text(t.summary, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+        if (insights.nextSteps.isNotEmpty()) item { SectionCard("Next steps", Icons.Filled.TrendingUp) { BulletList(insights.nextSteps) } }
+        if (insights.risks.isNotEmpty()) item { SectionCard("Risks & concerns", Icons.Filled.Warning) { BulletList(insights.risks) } }
+        if (insights.sentiment.isNotBlank()) {
+            item { SectionCard("Tone", Icons.Filled.Forum) { Text(insights.sentiment, style = MaterialTheme.typography.bodyMedium) } }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Transcript
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, onAskAboutSelection: () -> Unit) {
+    val selection by vm.selection.collectAsStateWithLifecycle()
+    val position by vm.player.position.collectAsStateWithLifecycle()
+    val playing by vm.player.playing.collectAsStateWithLifecycle()
+    val clipboard = LocalClipboardManager.current
+    var speakerDialog by remember { mutableStateOf<String?>(null) }
+    var assigning by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<TranscriptSegment?>(null) }
+    val listState = rememberLazyListState()
+
+    if (meeting.segments.isEmpty()) {
+        EmptyState(
+            Icons.Filled.Forum,
+            if (meeting.isProcessing || meeting.status == MeetingStatus.RECORDING) "Transcribing…" else "No transcript",
+            "Transcribed speech will appear here.",
+        )
+        return
+    }
+
+    val activeId = if (playing) meeting.segments.lastOrNull { it.startMs <= position }?.id else null
+    LaunchedEffect(activeId) {
+        val index = meeting.segments.indexOfFirst { it.id == activeId }
+        if (index >= 0) listState.animateScrollToItem(index)
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        SpeakersRow(meeting, onSpeakerClick = { speakerDialog = it })
+        HorizontalDivider()
+        if (selection.isNotEmpty()) {
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text("${selection.size} selected", Modifier.align(Alignment.CenterVertically).padding(horizontal = 8.dp))
+                    TextButton(onClick = onAskAboutSelection) { Icon(Icons.Filled.QuestionAnswer, null); Spacer(Modifier.width(4.dp)); Text("Ask AI") }
+                    TextButton(onClick = { assigning = true }) { Icon(Icons.Filled.Person, null); Spacer(Modifier.width(4.dp)); Text("Speaker") }
+                    if (selection.size == 1) {
+                        TextButton(onClick = {
+                            editing = meeting.segments.firstOrNull { it.id in selection }
+                            vm.selection.value = emptySet()
+                        }) { Icon(Icons.Filled.Edit, null); Spacer(Modifier.width(4.dp)); Text("Edit") }
+                    }
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(vm.copySelectionText())) }) {
+                        Icon(Icons.Filled.ContentCopy, null); Spacer(Modifier.width(4.dp)); Text("Copy")
+                    }
+                    IconButton(onClick = { vm.selection.value = emptySet() }) { Icon(Icons.Filled.Close, contentDescription = "Clear selection") }
+                }
+            }
+        } else {
+            Text(
+                "Tap a line to play from there · long-press to select lines and ask AI, fix the speaker or edit",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+        }
+        LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 24.dp)) {
+            items(meeting.segments, key = { it.id }) { seg ->
+                val selected = seg.id in selection
+                val background = when {
+                    selected -> MaterialTheme.colorScheme.primaryContainer
+                    seg.id == activeId -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+                    else -> MaterialTheme.colorScheme.surface
+                }
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(background)
+                        .combinedClickable(
+                            onClick = { if (selection.isNotEmpty()) vm.toggleSelection(seg.id) else vm.player.seekTo(seg.startMs) },
+                            onLongClick = { vm.toggleSelection(seg.id) },
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SpeakerBadge(meeting.speaker(seg.speakerId), onClick = { seg.speakerId?.let { speakerDialog = it } })
+                        Spacer(Modifier.width(8.dp))
+                        Text(TranscriptFormatter.timestamp(seg.startMs), style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text(seg.text, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+    }
+
+    speakerDialog?.let { id ->
+        val speaker = meeting.speaker(id)
+        if (speaker == null) {
+            speakerDialog = null
+        } else {
+            SpeakerDialog(
+                speaker = speaker,
+                meeting = meeting,
+                onDismiss = { speakerDialog = null },
+                onRename = { vm.renameSpeaker(id, it); speakerDialog = null },
+                onDismissSuggestion = { vm.dismissSuggestion(id) },
+                onMerge = { into -> vm.mergeSpeaker(id, into); speakerDialog = null },
+                onDetectWithAi = { vm.separateSpeakers(); speakerDialog = null },
+                onSuggestNames = { vm.suggestNames(); speakerDialog = null },
+            )
+        }
+    }
+    if (assigning) {
+        AssignSpeakerDialog(
+            speakers = meeting.speakers,
+            onDismiss = { assigning = false },
+            onPick = { vm.assignSelection(it, null); assigning = false },
+            onNew = { vm.assignSelection(null, it); assigning = false },
+        )
+    }
+    editing?.let { seg ->
+        EditSegmentDialog(
+            segment = seg,
+            onDismiss = { editing = null },
+            onSave = { vm.editSegment(seg.id, it); editing = null },
+            onDelete = { vm.deleteSegment(seg.id); editing = null },
+        )
+    }
+}
+
+@Composable
+private fun SpeakersRow(meeting: Meeting, onSpeakerClick: (String) -> Unit) {
+    FlowRow(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        meeting.speakers.forEach { speaker ->
+            val count = meeting.segments.count { it.speakerId == speaker.id }
+            Box {
+                SpeakerBadge(speaker, onClick = { onSpeakerClick(speaker.id) })
+            }
+            Text("$count", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically))
+        }
+    }
+    if (meeting.speakers.any { it.isPlaceholder }) {
+        Text(
+            "Names in italics are placeholders for unidentified speakers. Tap one to rename it.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun SpeakerDialog(
+    speaker: Speaker,
+    meeting: Meeting,
+    onDismiss: () -> Unit,
+    onRename: (String) -> Unit,
+    onDismissSuggestion: () -> Unit,
+    onMerge: (String) -> Unit,
+    onDetectWithAi: () -> Unit,
+    onSuggestNames: () -> Unit,
+) {
+    var name by remember(speaker.id) { mutableStateOf(if (speaker.isPlaceholder) "" else speaker.name) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(speaker.name) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val lines = meeting.segments.count { it.speakerId == speaker.id }
+                Text(
+                    if (speaker.isPlaceholder) "A placeholder name for a speaker the app couldn't identify ($lines lines)."
+                    else "$lines lines in this meeting.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                val suggestion = speaker.suggestedName
+                if (suggestion != null) {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("AI thinks this is $suggestion", style = MaterialTheme.typography.titleSmall)
+                            if (!speaker.suggestionReason.isNullOrBlank()) {
+                                Text(speaker.suggestionReason!!, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Row {
+                                TextButton(onClick = { onRename(suggestion) }) { Text("Use $suggestion") }
+                                TextButton(onClick = onDismissSuggestion) { Text("Dismiss") }
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    placeholder = { Text("e.g. Priya") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                val others = meeting.speakers.filter { it.id != speaker.id }
+                if (others.isNotEmpty()) {
+                    Text("Same person as…", style = MaterialTheme.typography.labelLarge)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        others.forEach { other -> SpeakerBadge(other, onClick = { onMerge(other.id) }) }
+                    }
+                }
+                HorizontalDivider()
+                Row {
+                    TextButton(onClick = onSuggestNames) { Text("Suggest names") }
+                    TextButton(onClick = onDetectWithAi) { Text("Re-detect speakers") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onRename(name) }, enabled = name.isNotBlank()) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+@Composable
+private fun AssignSpeakerDialog(
+    speakers: List<Speaker>,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+    onNew: (String?) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Who said this?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    speakers.forEach { s -> SpeakerBadge(s, onClick = { onPick(s.id) }) }
+                }
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Or a new speaker") },
+                    placeholder = { Text("Leave blank for a random name") },
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onNew(name.ifBlank { null }) }) { Text("New speaker") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun EditSegmentDialog(segment: TranscriptSegment, onDismiss: () -> Unit, onSave: (String) -> Unit, onDelete: () -> Unit) {
+    var text by remember(segment.id) { mutableStateOf(segment.text) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit line at ${TranscriptFormatter.timestamp(segment.startMs)}") },
+        text = { OutlinedTextField(text, { text = it }, modifier = Modifier.fillMaxWidth()) },
+        confirmButton = { TextButton(onClick = { onSave(text) }) { Text("Save") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDelete) { Text("Delete line", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ask AI
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
+    val excerpt by vm.excerpt.collectAsStateWithLifecycle()
+    var input by rememberSaveable { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val thinking = Busy.ASK in busy
+    LaunchedEffect(meeting.chat.size, thinking) {
+        val count = meeting.chat.size + if (thinking) 1 else 0
+        if (count > 0) listState.animateScrollToItem(count - 1)
+    }
+    fun send(text: String) {
+        vm.ask(text)
+        input = ""
+    }
+
+    Column(Modifier.fillMaxSize().imePadding()) {
+        if (meeting.chat.isEmpty() && !thinking) {
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Ask anything about this meeting", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Answers cite timestamps from the transcript. Select lines in the Transcript tab to ask about a specific part.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val suggestions = buildList {
+                    add("What were the key decisions and who made them?")
+                    add("What did each person commit to?")
+                    add("What was left unresolved?")
+                    add("Draft a follow-up email to the attendees")
+                    add("What should I prepare before the next meeting?")
+                    meeting.speakers.firstOrNull { !it.isPlaceholder }?.let { add("What were ${it.name}'s main concerns?") }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    suggestions.forEach { s -> AssistChip(onClick = { send(s) }, label = { Text(s) }) }
+                }
+            }
+        } else {
+            LazyColumn(
+                Modifier.weight(1f),
+                state = listState,
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(meeting.chat, key = { it.id }) { message ->
+                    val mine = message.role == ChatRole.USER
+                    Box(Modifier.fillMaxWidth(), contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = when {
+                                message.isError -> MaterialTheme.colorScheme.errorContainer
+                                mine -> MaterialTheme.colorScheme.primaryContainer
+                                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            modifier = Modifier.widthIn(max = 340.dp),
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                message.excerpt?.let {
+                                    Text(
+                                        "About ${TranscriptFormatter.timestamp(it.startMs)}–${TranscriptFormatter.timestamp(it.endMs)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                                if (mine || message.isError) {
+                                    Text(message.content, style = MaterialTheme.typography.bodyMedium)
+                                } else {
+                                    SelectionContainer { MarkdownText(message.content) }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (thinking) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Thinking…", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                if (meeting.chat.isNotEmpty()) {
+                    item {
+                        TextButton(onClick = { vm.clearChat() }) { Text("Clear conversation") }
+                    }
+                }
+            }
+        }
+        excerpt?.let {
+            InputChip(
+                selected = true,
+                onClick = { vm.excerpt.value = null },
+                label = { Text("Asking about ${TranscriptFormatter.timestamp(it.startMs)}–${TranscriptFormatter.timestamp(it.endMs)}") },
+                trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) },
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                placeholder = { Text("Ask about the meeting…") },
+                modifier = Modifier.weight(1f),
+                maxLines = 4,
+            )
+            IconButton(onClick = { send(input) }, enabled = input.isNotBlank() && !thinking) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Gaps & questions
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+fun GapsTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onAsk: (String) -> Unit) {
+    val gaps = meeting.gaps
+    if (gaps == null) {
+        val working = meeting.isProcessing || Busy.GAPS in busy
+        EmptyState(
+            Icons.Filled.QuestionAnswer,
+            if (working) "Looking for gaps…" else "Find what's missing",
+            "AI reviews the meeting for missing owners, deadlines, unanswered questions and vague details, then asks you questions to fill them in.",
+        ) {
+            if (working) CircularProgressIndicator()
+            else Button(onClick = vm::generateGaps, enabled = meeting.segments.isNotEmpty()) { Text("Find gaps & questions") }
+        }
+        return
+    }
+    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (gaps.gaps.isNotEmpty()) {
+            item { Text("Gaps", style = MaterialTheme.typography.titleMedium) }
+            items(gaps.gaps) { gap ->
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Flag, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(gap.title, style = MaterialTheme.typography.titleSmall)
+                        }
+                        if (gap.detail.isNotBlank()) Text(gap.detail, style = MaterialTheme.typography.bodyMedium)
+                        if (gap.suggestion.isNotBlank()) {
+                            Text("Suggestion: ${gap.suggestion}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        TextButton(onClick = { onAsk("Help me fill this gap: ${gap.title}. ${gap.detail}") }) {
+                            Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Ask AI to help fill it")
+                        }
+                    }
+                }
+            }
+        }
+        if (gaps.questions.isNotEmpty()) {
+            item { Text("Questions for you", style = MaterialTheme.typography.titleMedium) }
+            item {
+                Text(
+                    "Your answers are saved with the meeting and used by the summary and Ask AI.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            items(gaps.questions, key = { it.id }) { q ->
+                var answer by remember(q.id) { mutableStateOf(q.answer.orEmpty()) }
+                Card {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!q.answer.isNullOrBlank()) {
+                                Icon(Icons.Filled.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(q.question, style = MaterialTheme.typography.titleSmall)
+                        }
+                        if (q.context.isNotBlank()) {
+                            Text(q.context, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        OutlinedTextField(
+                            value = answer,
+                            onValueChange = { answer = it },
+                            placeholder = { Text("Your answer") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (answer != q.answer.orEmpty()) {
+                            TextButton(onClick = { vm.answerQuestion(q.id, answer) }) { Text("Save answer") }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(
+                    onClick = vm::refreshWithAnswers,
+                    enabled = Busy.INSIGHTS !in busy && gaps.questions.any { !it.answer.isNullOrBlank() },
+                ) { Text("Update summary with answers") }
+                OutlinedButton(onClick = vm::generateGaps, enabled = Busy.GAPS !in busy) {
+                    Text(if (Busy.GAPS in busy) "Looking…" else "Find more")
+                }
+            }
+        }
+    }
+}

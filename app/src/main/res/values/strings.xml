@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">KaliScriber</string>
+    <string name="recording_channel">Meeting recording</string>
+</resources>
