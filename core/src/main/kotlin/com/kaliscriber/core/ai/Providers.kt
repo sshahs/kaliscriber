@@ -151,6 +151,8 @@ data class AppSettings(
     val chatProvider: ProviderId = ProviderId.OPENAI,
     val sttProvider: ProviderId = ProviderId.LOCAL,
     val ttsEngine: TtsEngine = TtsEngine.DEVICE,
+    /** Package of the phone's text-to-speech engine to use; blank uses the system default. */
+    val deviceTtsEngine: String = "",
     /** Id of the on-device speech recognition model (see the app's model catalog). */
     val localAsrModel: String = "",
     /** Detect speakers on-device when a meeting ends (needs the speaker models). */

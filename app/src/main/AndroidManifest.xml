@@ -12,8 +12,12 @@
     <!-- Keeps the CPU running while a meeting is recorded and processed with the screen off. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Apps the export features hand notes to (package visibility, Android 11+). -->
+    <!-- Apps the export features hand notes to, and text-to-speech engines such as NekoSpeak or
+         RHVoice (package visibility, Android 11+: without this only built-in engines are visible). -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
         <package android:name="com.google.android.apps.docs.editors.docs" />
         <intent>
             <action android:name="android.intent.action.SENDTO" />

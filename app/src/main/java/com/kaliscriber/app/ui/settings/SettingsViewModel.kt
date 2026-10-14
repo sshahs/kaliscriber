@@ -61,6 +61,26 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.models.refresh() }
     }
 
+    /** Text-to-speech engines installed on the phone, as (package, name). */
+    fun ttsEngines(): List<Pair<String, String>> = container.speech.installedEngines()
+
+    private val _voiceTest = MutableStateFlow<String?>(null)
+    /** Result of the last "Test voice", or null. */
+    val voiceTest: StateFlow<String?> = _voiceTest.asStateFlow()
+
+    fun testVoice() {
+        viewModelScope.launch {
+            _voiceTest.value = "Speaking…"
+            _voiceTest.value = try {
+                container.speech.speak("settings-test", "This is how KaliScriber will read your summaries and answers.")
+                null
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                e.message ?: "The voice didn't work."
+            }
+        }
+    }
+
     fun downloadModel(model: LocalModel) {
         container.models.download(model)
         // The first recognizer downloaded becomes the active one.

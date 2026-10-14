@@ -190,6 +190,35 @@ private fun ActiveServices(settings: AppSettings, keys: Set<ProviderId>, vm: Set
             onSelect = { engine -> vm.update { it.copy(ttsEngine = engine) } },
             modifier = Modifier.fillMaxWidth(),
         )
+        if (settings.ttsEngine == TtsEngine.DEVICE) {
+            val engines = remember { vm.ttsEngines() }
+            val names = engines.toMap()
+            DropdownSelector(
+                label = "Phone voice engine",
+                selected = settings.deviceTtsEngine,
+                options = listOf("") + engines.map { it.first },
+                optionLabel = { pkg ->
+                    when {
+                        pkg.isEmpty() -> "System default"
+                        else -> names[pkg] ?: "$pkg (not installed)"
+                    }
+                },
+                onSelect = { pkg -> vm.update { it.copy(deviceTtsEngine = pkg) } },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (engines.isEmpty()) {
+                Text(
+                    "No text-to-speech engine found. Install one, such as NekoSpeak or RHVoice, or use ElevenLabs.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+        val voiceTest by vm.voiceTest.collectAsStateWithLifecycle()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = vm::testVoice) { Text("Test voice") }
+            voiceTest?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f)) }
+        }
     }
 }
 

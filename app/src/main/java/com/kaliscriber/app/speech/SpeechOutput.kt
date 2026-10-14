@@ -1,6 +1,7 @@
 package com.kaliscriber.app.speech
 
 import android.content.Context
+import android.content.Intent
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.RandomAccessFile
@@ -39,6 +41,7 @@ class SpeechOutput(
     val speaking: StateFlow<String?> = _speaking.asStateFlow()
 
     private var tts: TextToSpeech? = null
+    private var ttsEnginePackage: String? = null
     private var ttsReady: CompletableDeferred<Boolean>? = null
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private var player: MediaPlayer? = null
@@ -157,14 +160,55 @@ class SpeechOutput(
 
     private fun maxDeviceChars(): Int = (TextToSpeech.getMaxSpeechInputLength() - 100).coerceIn(500, 3_900)
 
+    /** Text-to-speech engines installed on the phone, as (package, name), e.g. NekoSpeak or RHVoice. */
+    fun installedEngines(): List<Pair<String, String>> {
+        val pm = context.packageManager
+        return pm.queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0)
+            .mapNotNull { info ->
+                val service = info.serviceInfo ?: return@mapNotNull null
+                service.packageName to (service.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() } ?: service.packageName)
+            }
+            .distinctBy { it.first }
+            .sortedBy { it.second.lowercase() }
+    }
+
+    /**
+     * The phone's speech engine: the one chosen in settings, else the system default, else any
+     * installed engine that starts (GrapheneOS and other phones without Google services may have no
+     * default set).
+     */
     private suspend fun deviceTts(): TextToSpeech {
+        val wanted = settings().deviceTtsEngine
         tts?.let { existing ->
-            if (ttsReady?.await() == true) return existing
+            if (ttsEnginePackage == wanted && ttsReady?.await() == true) return existing
+            existing.shutdown()
+            tts = null
         }
+        val installed = installedEngines().map { it.first }
+        val candidates = (listOf(wanted) + listOf("") + installed).distinct()
+            .filter { it.isEmpty() || it in installed }
+        for (pkg in candidates) {
+            startEngine(pkg)?.let { engine ->
+                ttsEnginePackage = wanted
+                return engine
+            }
+        }
+        throw AiException(
+            if (installed.isEmpty()) {
+                "No text-to-speech engine is installed. Install one (for example NekoSpeak or RHVoice), or choose ElevenLabs in Settings."
+            } else {
+                "The phone's text-to-speech engine didn't start. Pick another engine in Settings, or choose ElevenLabs."
+            },
+        )
+    }
+
+    /** Starts the engine in [pkg] (blank: system default); null if it doesn't come up. */
+    private suspend fun startEngine(pkg: String): TextToSpeech? {
         val ready = CompletableDeferred<Boolean>()
         ttsReady = ready
         val engine = withContext(Dispatchers.Main) {
-            TextToSpeech(context) { status -> ready.complete(status == TextToSpeech.SUCCESS) }
+            val onInit = TextToSpeech.OnInitListener { status -> ready.complete(status == TextToSpeech.SUCCESS) }
+            if (pkg.isEmpty()) TextToSpeech(context, onInit) else TextToSpeech(context, onInit, pkg)
         }
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) = Unit
@@ -185,12 +229,12 @@ class SpeechOutput(
                 utteranceId?.let { pending.remove(it)?.complete(false) }
             }
         })
-        tts = engine
-        if (!withTimeout(10_000) { ready.await() }) {
-            tts = null
+        // Neural engines can take a while to load their voice the first time.
+        if (withTimeoutOrNull(20_000) { ready.await() } != true) {
             engine.shutdown()
-            throw AiException("This phone has no text-to-speech voice. Install one in Android settings or choose ElevenLabs.")
+            return null
         }
+        tts = engine
         return engine
     }
 
