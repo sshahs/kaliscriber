@@ -169,6 +169,7 @@ data class AppSettings(
     val autoAnalyze: Boolean = true,
     /** Rough cap on transcript characters sent to the LLM in one request. */
     val maxTranscriptChars: Int = 400_000,
+    val export: ExportSettings = ExportSettings(),
 ) {
     fun settingsFor(id: ProviderId): ProviderSettings = providers[id] ?: ProviderSettings()
 
@@ -189,6 +190,28 @@ data class AppSettings(
     fun withProvider(id: ProviderId, transform: (ProviderSettings) -> ProviderSettings): AppSettings =
         copy(providers = providers + (id to transform(settingsFor(id))))
 }
+
+/** Where meeting notes can be sent. Tokens and passwords are stored encrypted by the app. */
+@Serializable
+data class ExportSettings(
+    /** Add the full transcript to exported notes. */
+    val includeTranscript: Boolean = false,
+    /** Default recipients for email export, comma separated. */
+    val emailTo: String = "",
+    /** Notion page (URL or id) that new meeting pages are created under. */
+    val notionParent: String = "",
+    val affineServer: String = "https://app.affine.pro",
+    val affineWorkspaceId: String = "",
+    /** CalDAV calendar collection for the meeting event (e.g. Baikal .../dav.php/calendars/user/default/). */
+    val caldavUrl: String = "",
+    /** Collection for action items; blank uses [caldavUrl]. */
+    val caldavTasksUrl: String = "",
+    val caldavUser: String = "",
+    val caldavEvent: Boolean = true,
+    val caldavTasks: Boolean = true,
+    /** Upload straight to Google Docs with the user's Google account (needs an OAuth client). */
+    val googleDirectUpload: Boolean = false,
+)
 
 /** Fully resolved settings for one provider, including the key. */
 data class ProviderConfig(

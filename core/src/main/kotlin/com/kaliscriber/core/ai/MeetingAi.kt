@@ -29,6 +29,8 @@ import kotlin.random.Random
 
 data class NameSuggestion(val speakerId: String, val name: String, val confidence: Double, val reason: String)
 
+private val ISO_DATE = Regex("\\d{4}-\\d{2}-\\d{2}")
+
 enum class NoteAction(val label: String, val instruction: String) {
     TIDY(
         "Tidy up",
@@ -90,6 +92,7 @@ class MeetingAi(
                     task = task,
                     owner = a?.str("owner", "assignee")?.takeUnless { it.equals("null", true) || it.equals("unassigned", true) },
                     dueDate = a?.str("dueDate", "due", "deadline")?.takeUnless { it.equals("null", true) },
+                    dueDateIso = a?.str("dueDateIso", "due_date_iso")?.takeIf { ISO_DATE.matches(it) },
                     priority = a?.str("priority")?.lowercase(),
                     done = wasDone,
                 )

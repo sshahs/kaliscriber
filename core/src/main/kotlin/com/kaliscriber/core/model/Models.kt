@@ -110,6 +110,8 @@ data class ActionItem(
     val task: String,
     val owner: String? = null,
     val dueDate: String? = null,
+    /** The due date as YYYY-MM-DD when it could be worked out (used for calendar tasks). */
+    val dueDateIso: String? = null,
     val priority: String? = null,
     val done: Boolean = false,
 )

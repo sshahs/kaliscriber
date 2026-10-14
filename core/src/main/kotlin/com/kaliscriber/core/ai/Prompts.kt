@@ -30,7 +30,7 @@ object Prompts {
           "summary": "3-6 sentence executive summary",
           "keyPoints": ["important point"],
           "highlights": [{"text": "notable quote or moment", "speaker": "name", "timestamp": "mm:ss", "why": "why it matters"}],
-          "actionItems": [{"task": "what needs to be done", "owner": "name or null", "dueDate": "deadline as stated or null", "priority": "high|medium|low"}],
+          "actionItems": [{"task": "what needs to be done", "owner": "name or null", "dueDate": "deadline as stated or null", "dueDateIso": "the deadline as YYYY-MM-DD relative to the meeting date, or null", "priority": "high|medium|low"}],
           "decisions": ["decision that was made"],
           "topics": [{"name": "topic", "summary": "one or two sentences"}],
           "risks": ["risk, blocker or concern raised"],
