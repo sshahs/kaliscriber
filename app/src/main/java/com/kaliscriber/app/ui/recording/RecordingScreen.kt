@@ -20,6 +20,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.TextButton
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
@@ -77,11 +83,15 @@ class RecordingViewModel(private val container: AppContainer) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun pause(paused: Boolean) = container.recorder.setPaused(paused)
+    fun setExpectedSpeakers(count: Int?) {
+        val id = meeting.value?.id ?: return
+        viewModelScope.launch { container.pipeline.setExpectedSpeakers(id, count) }
+    }
     fun stop() = container.recorder.stop()
 }
 
 @Composable
-fun RecordingScreen(onBack: () -> Unit, onFinished: (String) -> Unit) {
+fun RecordingScreen(onBack: () -> Unit, onAskAi: (String) -> Unit, onFinished: (String) -> Unit) {
     val vm = appViewModel { RecordingViewModel(it) }
     val state by vm.state.collectAsStateWithLifecycle()
     val meeting by vm.meeting.collectAsStateWithLifecycle()
@@ -116,7 +126,19 @@ fun RecordingScreen(onBack: () -> Unit, onFinished: (String) -> Unit) {
         Column(Modifier.padding(padding).fillMaxSize()) {
             val s = state
             when (s) {
-                is RecordingState.Recording -> RecorderHeader(s, onPause = { vm.pause(!s.paused) }, onStop = vm::stop)
+                is RecordingState.Recording -> {
+                    RecorderHeader(s, onPause = { vm.pause(!s.paused) }, onStop = vm::stop)
+                    ExpectedSpeakersRow(meeting?.expectedSpeakers, onSelect = vm::setExpectedSpeakers)
+                    TextButton(
+                        onClick = { onAskAi(s.meetingId) },
+                        enabled = !meeting?.segments.isNullOrEmpty(),
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                    ) {
+                        Icon(Icons.Filled.QuestionAnswer, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Ask AI about the meeting so far")
+                    }
+                }
                 is RecordingState.Finishing -> Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(12.dp))
@@ -166,6 +188,20 @@ private fun RecorderHeader(state: RecordingState.Recording, onPause: () -> Unit,
                 Icon(Icons.Filled.Stop, null)
                 Spacer(Modifier.width(8.dp))
                 Text("Stop & analyse")
+            }
+        }
+    }
+}
+
+/** "How many people?" picker; a known count makes speaker detection more accurate. */
+@Composable
+fun ExpectedSpeakersRow(selected: Int?, onSelect: (Int?) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Text("People in this meeting", style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            FilterChip(selected = selected == null, onClick = { onSelect(null) }, label = { Text("Auto") })
+            (2..8).forEach { n ->
+                FilterChip(selected = selected == n, onClick = { onSelect(n) }, label = { Text(if (n == 8) "8+" else "$n") })
             }
         }
     }

@@ -2,6 +2,25 @@
 
 package com.kaliscriber.app.ui.meeting
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarResult
+import com.kaliscriber.app.export.ExportTarget
+import com.kaliscriber.app.export.GoogleAuth
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -63,6 +82,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun MeetingScreen(
     meetingId: String,
+    initialTab: Int = 0,
     onBack: () -> Unit,
     onOpenNote: (String) -> Unit,
     onOpenSettings: () -> Unit,
@@ -73,12 +93,52 @@ fun MeetingScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(initialTab.coerceIn(0, 3)) }
+    var exportOpen by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) {
+        vm.exportResults.collect { result ->
+            val url = result.url
+            val action = snackbar.showSnackbar(result.message, actionLabel = if (url != null) "Open" else null, withDismissAction = url == null)
+            if (action == SnackbarResult.ActionPerformed && url != null) {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
+        }
+    }
+
+    suspend fun openDocxInGoogleDocs(reason: String?) {
+        if (reason != null) snackbar.showSnackbar(reason)
+        vm.googleDocsFileIntent()?.let { runCatching { context.startActivity(it) } }
+    }
+    val googleConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        val token = GoogleAuth.tokenFromResult(context, result.data)
+        if (token != null) vm.exportGoogleDocs(token) else vm.showMessage("Google sign-in was cancelled")
+    }
+    fun exportTo(target: ExportTarget) {
+        exportOpen = false
+        when (target) {
+            ExportTarget.EMAIL -> vm.emailIntent()?.let { runCatching { context.startActivity(it) } }
+            ExportTarget.GOOGLE_DOCS -> if (vm.googleDirectUpload) {
+                GoogleAuth.authorize(context) { outcome ->
+                    when (outcome) {
+                        is GoogleAuth.Outcome.Token -> vm.exportGoogleDocs(outcome.accessToken)
+                        is GoogleAuth.Outcome.NeedsConsent ->
+                            googleConsent.launch(IntentSenderRequest.Builder(outcome.intent.intentSender).build())
+                        is GoogleAuth.Outcome.Failed -> scope.launch {
+                            openDocxInGoogleDocs("Google sign-in isn't set up for this build (${outcome.message}). Opening the notes in Google Docs as a Word file instead.")
+                        }
+                    }
+                }
+            } else {
+                scope.launch { openDocxInGoogleDocs(null) }
+            }
+            else -> vm.export(target)
+        }
+    }
     LaunchedEffect(meeting?.audioPath, meeting?.status) {
         // Only play the recording once it has been finalized.
         vm.player.load(meeting?.takeIf { it.status != MeetingStatus.RECORDING }?.audioPath)
@@ -98,8 +158,12 @@ fun MeetingScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
-                    IconButton(onClick = { shareText(context, m.title, vm.markdown()) }) {
-                        Icon(Icons.Filled.Share, contentDescription = "Share")
+                    if (Busy.EXPORT in busy) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        IconButton(onClick = { exportOpen = true }) {
+                            Icon(Icons.Filled.IosShare, contentDescription = "Export")
+                        }
                     }
                     IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -123,6 +187,14 @@ fun MeetingScreen(
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             StatusBanner(m, busy, onRetry = vm::retryPending)
+            if (m.status == MeetingStatus.RECORDING) {
+                Text(
+                    "Recording in progress. Ask AI works on the transcript so far.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
             ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
                 listOf("Summary", "Transcript", "Ask AI", "Gaps & questions").forEachIndexed { i, label ->
                     Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
@@ -141,6 +213,22 @@ fun MeetingScreen(
                 })
             }
         }
+    }
+
+    if (exportOpen) {
+        ExportSheet(
+            missing = { vm.missingSetup(it) },
+            onDismiss = { exportOpen = false },
+            onExport = ::exportTo,
+            onShareText = {
+                exportOpen = false
+                shareText(context, m.title, vm.markdown())
+            },
+            onOpenSettings = {
+                exportOpen = false
+                onOpenSettings()
+            },
+        )
     }
 
     if (renaming) {
@@ -166,6 +254,52 @@ fun MeetingScreen(
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
+    }
+}
+
+@Composable
+private fun ExportSheet(
+    missing: (ExportTarget) -> String?,
+    onDismiss: () -> Unit,
+    onExport: (ExportTarget) -> Unit,
+    onShareText: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(bottom = 24.dp)) {
+            Text("Export meeting notes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+            ExportTarget.entries.forEach { target ->
+                val needs = missing(target)
+                ListItem(
+                    headlineContent = { Text(target.label) },
+                    supportingContent = {
+                        Text(
+                            needs?.let { "Set up first: $it" } ?: target.description,
+                            color = if (needs != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    leadingContent = {
+                        Icon(
+                            when (target) {
+                                ExportTarget.EMAIL -> Icons.Filled.Email
+                                ExportTarget.GOOGLE_DOCS -> Icons.Filled.Description
+                                ExportTarget.NOTION -> Icons.Filled.Article
+                                ExportTarget.AFFINE -> Icons.Filled.Dashboard
+                                ExportTarget.CALDAV -> Icons.Filled.Event
+                            },
+                            contentDescription = null,
+                        )
+                    },
+                    modifier = Modifier.clickable { if (needs != null) onOpenSettings() else onExport(target) },
+                )
+            }
+            ListItem(
+                headlineContent = { Text("Share as text") },
+                supportingContent = { Text("Send Markdown to any app") },
+                leadingContent = { Icon(Icons.Filled.Share, contentDescription = null) },
+                modifier = Modifier.clickable(onClick = onShareText),
+            )
+        }
     }
 }
 

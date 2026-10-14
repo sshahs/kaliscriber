@@ -16,9 +16,9 @@ object Routes {
     const val HOME = "home"
     const val RECORDING = "recording"
     const val SETTINGS = "settings"
-    const val MEETING = "meeting/{id}"
+    const val MEETING = "meeting/{id}?tab={tab}"
     const val NOTE = "note/{id}"
-    fun meeting(id: String) = "meeting/$id"
+    fun meeting(id: String, tab: Int = 0) = "meeting/$id?tab=$tab"
     fun note(id: String) = "note/$id"
 }
 
@@ -37,6 +37,7 @@ fun AppNavigation() {
         composable(Routes.RECORDING) {
             RecordingScreen(
                 onBack = { nav.popBackStack() },
+                onAskAi = { meetingId -> nav.navigate(Routes.meeting(meetingId, tab = 2)) },
                 onFinished = { meetingId ->
                     nav.navigate(Routes.meeting(meetingId)) { popUpTo(Routes.HOME) }
                 },
@@ -45,10 +46,20 @@ fun AppNavigation() {
         composable(Routes.SETTINGS) {
             SettingsScreen(onBack = { nav.popBackStack() })
         }
-        composable(Routes.MEETING, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+        composable(
+            Routes.MEETING,
+            arguments = listOf(
+                navArgument("id") { type = NavType.StringType },
+                navArgument("tab") {
+                    type = NavType.IntType
+                    defaultValue = 0
+                },
+            ),
+        ) { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             MeetingScreen(
                 meetingId = id,
+                initialTab = entry.arguments?.getInt("tab") ?: 0,
                 onBack = { nav.popBackStack() },
                 onOpenNote = { nav.navigate(Routes.note(it)) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },

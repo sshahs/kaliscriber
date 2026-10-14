@@ -71,7 +71,10 @@ import com.kaliscriber.app.ui.common.DropdownSelector
 import com.kaliscriber.app.ui.common.SectionCard
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.ProviderId
+import com.kaliscriber.app.data.ExportSecret
+import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.speech.ModelCatalog
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.core.ai.TtsEngine
 import com.kaliscriber.core.ai.stt.SttClients
@@ -103,6 +106,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         ) {
             item { ActiveServices(settings, keys, vm) }
             item { LocalSpeechSection(settings, modelStates, vm) }
+            item { VoiceMemorySection(settings, modelStates, vm) }
             item {
                 Column {
                     Text("Providers & API keys", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
@@ -124,6 +128,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     vm = vm,
                 )
             }
+            item { ExportSection(settings, vm) }
             item { ProcessingSettings(settings, vm) }
             item {
                 Text(
@@ -243,6 +248,179 @@ private fun LocalSpeechSection(settings: AppSettings, states: Map<String, ModelS
             if (diarizationReady) "Runs after each meeting; long meetings take a few minutes." else "Download the speaker detection pack first.",
             settings.localDiarization,
         ) { v -> vm.update { it.copy(localDiarization = v) } }
+    }
+}
+
+@Composable
+private fun VoiceMemorySection(settings: AppSettings, states: Map<String, ModelState>, vm: SettingsViewModel) {
+    val voices by vm.voices.collectAsStateWithLifecycle()
+    val ready = states[ModelCatalog.embedding.id] is ModelState.Ready
+    SectionCard("Voice memory") {
+        Text(
+            "Name a speaker once and KaliScriber recognises their voice in later meetings. Voiceprints are computed and stored only on this phone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ToggleRow(
+            "Remember voices",
+            if (ready) "${voices.size} saved voice${if (voices.size == 1) "" else "s"}" else "Needs the speaker detection pack above.",
+            settings.rememberVoices,
+        ) { v -> vm.update { it.copy(rememberVoices = v) } }
+        voices.sortedBy { it.name.lowercase() }.forEach { voice ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.RecordVoiceOver, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(voice.name, style = MaterialTheme.typography.bodyMedium)
+                    Text("Learned from ${voice.samples} meeting${if (voice.samples == 1) "" else "s"}", style = MaterialTheme.typography.labelSmall)
+                }
+                IconButton(onClick = { vm.deleteVoice(voice.id) }) { Icon(Icons.Filled.Delete, contentDescription = "Forget ${voice.name}") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportSection(settings: AppSettings, vm: SettingsViewModel) {
+    val secrets by vm.exportSecrets.collectAsStateWithLifecycle()
+    val status by vm.exportStatus.collectAsStateWithLifecycle()
+    val e = settings.export
+    var open by rememberSaveable { mutableStateOf<String?>(null) }
+    SectionCard("Export destinations") {
+        ToggleRow("Include the full transcript", "Otherwise exports contain the summary, decisions, action items and questions.", e.includeTranscript) { v ->
+            vm.updateExport { it.copy(includeTranscript = v) }
+        }
+        ExportCard("Email", "Default recipients", open == "email", { open = if (open == "email") null else "email" }) {
+            SettingField("Recipients (comma separated)", e.emailTo, KeyboardType.Email) { v -> vm.updateExport { it.copy(emailTo = v) } }
+        }
+        ExportCard(
+            "Notion",
+            if (ExportSecret.NOTION_TOKEN in secrets && e.notionParent.isNotBlank()) "Ready" else "Not set up",
+            open == "notion", { open = if (open == "notion") null else "notion" },
+        ) {
+            Text(
+                "Create an internal integration at notion.so/profile/integrations, copy its secret, then open the parent page in Notion and add the integration under ••• → Connections.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            SecretField("Integration secret", ExportSecret.NOTION_TOKEN in secrets) { vm.saveExportSecret(ExportSecret.NOTION_TOKEN, it) }
+            SettingField("Parent page link or id", e.notionParent, KeyboardType.Uri) { v -> vm.updateExport { it.copy(notionParent = v) } }
+            TestRow(status[ExportTarget.NOTION]) { vm.testExport(ExportTarget.NOTION) }
+        }
+        ExportCard(
+            "AFFiNE",
+            if (ExportSecret.AFFINE_TOKEN in secrets && e.affineWorkspaceId.isNotBlank()) "Ready" else "Not set up",
+            open == "affine", { open = if (open == "affine") null else "affine" },
+        ) {
+            Text(
+                "In AFFiNE open workspace settings → Integrations → MCP Server, create a read-write token, and copy the workspace id from the address bar (…/workspace/<id>/…). " +
+                    "If your server doesn't allow creating docs yet, KaliScriber copies the notes and opens AFFiNE so you can paste them.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            SettingField("Server", e.affineServer, KeyboardType.Uri) { v -> vm.updateExport { it.copy(affineServer = v) } }
+            SettingField("Workspace id", e.affineWorkspaceId) { v -> vm.updateExport { it.copy(affineWorkspaceId = v) } }
+            SecretField("MCP token", ExportSecret.AFFINE_TOKEN in secrets) { vm.saveExportSecret(ExportSecret.AFFINE_TOKEN, it) }
+            TestRow(status[ExportTarget.AFFINE]) { vm.testExport(ExportTarget.AFFINE) }
+        }
+        ExportCard(
+            "Calendar & tasks (Baikal / CalDAV)",
+            if (e.caldavUrl.isNotBlank() && ExportSecret.CALDAV_PASSWORD in secrets) "Ready" else "Not set up",
+            open == "caldav", { open = if (open == "caldav") null else "caldav" },
+        ) {
+            Text(
+                "Adds the meeting as an event and each action item as a task. For Baikal use https://<server>/dav.php/calendars/<user>/<calendar>/. Re-exporting updates the same items.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            SettingField("Calendar URL", e.caldavUrl, KeyboardType.Uri) { v -> vm.updateExport { it.copy(caldavUrl = v) } }
+            SettingField("Tasks calendar URL (optional)", e.caldavTasksUrl, KeyboardType.Uri) { v -> vm.updateExport { it.copy(caldavTasksUrl = v) } }
+            SettingField("Username", e.caldavUser) { v -> vm.updateExport { it.copy(caldavUser = v) } }
+            SecretField("Password", ExportSecret.CALDAV_PASSWORD in secrets) { vm.saveExportSecret(ExportSecret.CALDAV_PASSWORD, it) }
+            ToggleRow("Add the meeting as an event", "", e.caldavEvent) { v -> vm.updateExport { it.copy(caldavEvent = v) } }
+            ToggleRow("Add action items as tasks", "", e.caldavTasks) { v -> vm.updateExport { it.copy(caldavTasks = v) } }
+            TestRow(status[ExportTarget.CALDAV]) { vm.testExport(ExportTarget.CALDAV) }
+        }
+        ExportCard(
+            "Google Docs",
+            if (e.googleDirectUpload) "Direct upload" else "Opens a Word file in Google Docs",
+            open == "google", { open = if (open == "google") null else "google" },
+        ) {
+            Text(
+                "By default the notes open in the Google Docs app as a Word file; tap Save as Google Docs there. " +
+                    "For one-tap upload, create an Android OAuth client in a Google Cloud project with the Drive API enabled, using package com.kaliscriber.app and this app's SHA-1 below.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text("Signing SHA-1: ${vm.signingSha1 ?: "unknown"}", style = MaterialTheme.typography.labelSmall)
+            ToggleRow("Upload directly with my Google account", "", e.googleDirectUpload) { v -> vm.updateExport { it.copy(googleDirectUpload = v) } }
+        }
+    }
+}
+
+@Composable
+private fun ExportCard(title: String, subtitle: String, expanded: Boolean, onToggle: () -> Unit, content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null)
+        }
+        AnimatedVisibility(expanded) {
+            Column(Modifier.padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
+        }
+        HorizontalDivider()
+    }
+}
+
+/** A text setting that saves as you type. */
+@Composable
+private fun SettingField(label: String, value: String, keyboardType: KeyboardType = KeyboardType.Text, onChange: (String) -> Unit) {
+    var text by remember { mutableStateOf(value) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = {
+            text = it
+            onChange(it.trim())
+        },
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** A password-style field; the saved value is never shown, only replaced. */
+@Composable
+private fun SecretField(label: String, saved: Boolean, onSave: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text(label) },
+            placeholder = { Text(if (saved) "Saved · type to replace" else "Not set") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = {
+            onSave(text)
+            text = ""
+        }, enabled = text.isNotBlank()) { Text("Save") }
+    }
+}
+
+@Composable
+private fun TestRow(status: ProviderStatus?, onTest: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = onTest) { Text("Test") }
+        Spacer(Modifier.width(12.dp))
+        when (status) {
+            ProviderStatus.Working -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            is ProviderStatus.Ok -> Text(status.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            is ProviderStatus.Failed -> Text(status.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            else -> Unit
+        }
     }
 }
 

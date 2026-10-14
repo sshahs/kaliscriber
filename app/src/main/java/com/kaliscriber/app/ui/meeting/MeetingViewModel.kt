@@ -4,7 +4,12 @@ import android.media.MediaPlayer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
+import android.content.Intent
+import com.kaliscriber.app.export.ExportTarget
+import com.kaliscriber.app.export.exportMessage
 import com.kaliscriber.app.speech.VoiceRecorder
+import com.kaliscriber.core.export.ExportResult
+import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.transcript.TranscriptFormatter
@@ -23,7 +28,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
-enum class Busy { INSIGHTS, GAPS, ASK, SPEAKERS, NAMES, RETRY, BRIEFING }
+enum class Busy { INSIGHTS, GAPS, ASK, SPEAKERS, NAMES, RETRY, BRIEFING, EXPORT }
 
 /** Where the hands-free voice conversation is. */
 enum class VoicePhase { OFF, LISTENING, TRANSCRIBING, THINKING, SPEAKING }
@@ -161,6 +166,10 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     /** Listen → transcribe → ask → speak the answer, then listen again until stopped or silent. */
     fun startVoice() {
         if (voiceJob?.isActive == true) return
+        if (meeting.value?.status == MeetingStatus.RECORDING) {
+            showMessage("The microphone is recording the meeting. Type your question instead, or use voice after the meeting.")
+            return
+        }
         player.pause()
         speech.stop()
         voiceJob = viewModelScope.launch {
@@ -224,7 +233,63 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     }
 
     fun renameMeeting(title: String) = viewModelScope.launch { repo.rename(meetingId, title) }
-    fun renameSpeaker(speakerId: String, name: String) = viewModelScope.launch { repo.renameSpeaker(meetingId, speakerId, name) }
+    /** Renames the speaker; with voice memory on, their voice is remembered for future meetings. */
+    fun renameSpeaker(speakerId: String, name: String) = viewModelScope.launch { pipeline.renameSpeaker(meetingId, speakerId, name) }
+
+    fun setExpectedSpeakers(count: Int?) = viewModelScope.launch { pipeline.setExpectedSpeakers(meetingId, count) }
+
+    fun redetectSpeakers() = launchTask(Busy.SPEAKERS, "Speakers detected again") { pipeline.redetectSpeakers(meetingId) }
+
+    // --- Export ---------------------------------------------------------------------------------
+
+    private val exporter = container.exporter
+    private val _exportResults = Channel<ExportResult>(Channel.BUFFERED)
+    val exportResults = _exportResults.receiveAsFlow()
+
+    fun missingSetup(target: ExportTarget): String? = exporter.missingSetup(target)
+
+    val googleDirectUpload: Boolean get() = container.settings().export.googleDirectUpload
+
+    fun emailIntent(): Intent? = meeting.value?.let(exporter::emailIntent)
+
+    fun export(target: ExportTarget) {
+        val m = meeting.value ?: return
+        launchExport {
+            when (target) {
+                ExportTarget.NOTION -> exporter.notion(m)
+                ExportTarget.AFFINE -> exporter.affine(m)
+                ExportTarget.CALDAV -> exporter.caldav(m)
+                ExportTarget.EMAIL, ExportTarget.GOOGLE_DOCS -> error("Handled by the screen")
+            }
+        }
+    }
+
+    fun exportGoogleDocs(accessToken: String) {
+        val m = meeting.value ?: return
+        launchExport { exporter.googleDocsUpload(m, accessToken) }
+    }
+
+    /** Opens the notes as a Word file in Google Docs (no Google sign-in needed). */
+    suspend fun googleDocsFileIntent(): Intent? = meeting.value?.let { exporter.googleDocsFileIntent(it) }
+
+    private fun launchExport(block: suspend () -> ExportResult) {
+        if (Busy.EXPORT in _busy.value) return
+        _busy.update { it + Busy.EXPORT }
+        viewModelScope.launch {
+            try {
+                _exportResults.send(block())
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _messages.send(e.exportMessage())
+            } finally {
+                _busy.update { it - Busy.EXPORT }
+            }
+        }
+    }
+
+    fun showMessage(text: String) {
+        viewModelScope.launch { _messages.send(text) }
+    }
     fun dismissSuggestion(speakerId: String) = viewModelScope.launch { repo.dismissSuggestion(meetingId, speakerId) }
     fun mergeSpeaker(fromId: String, intoId: String) = viewModelScope.launch { repo.mergeSpeakers(meetingId, fromId, intoId) }
 

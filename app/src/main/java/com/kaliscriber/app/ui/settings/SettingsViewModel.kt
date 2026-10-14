@@ -11,7 +11,12 @@ import com.kaliscriber.core.ai.llm.LlmClients
 import com.kaliscriber.core.ai.llm.LlmMessage
 import com.kaliscriber.core.ai.llm.LlmRequest
 import com.kaliscriber.core.ai.llm.LlmRole
+import com.kaliscriber.app.data.ExportSecret
+import com.kaliscriber.app.export.ExportTarget
+import com.kaliscriber.app.export.exportMessage
 import com.kaliscriber.app.speech.LocalModel
+import com.kaliscriber.core.ai.ExportSettings
+import com.kaliscriber.core.speakers.VoiceProfile
 import com.kaliscriber.app.speech.ModelRole
 import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.core.ai.stt.SttClients
@@ -78,6 +83,50 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun downloadDiarization() = container.models.downloadDiarization()
+
+    // --- Voice memory ---------------------------------------------------------------------------
+
+    val voices: StateFlow<List<VoiceProfile>> = container.voices.profiles
+
+    fun deleteVoice(id: String) = viewModelScope.launch { container.voices.delete(id) }
+
+    fun renameVoice(id: String, name: String) = viewModelScope.launch { container.voices.rename(id, name) }
+
+    // --- Exports --------------------------------------------------------------------------------
+
+    val exportSecrets: StateFlow<Set<ExportSecret>> = container.secrets.configuredSecrets
+
+    private val _exportStatus = MutableStateFlow<Map<ExportTarget, ProviderStatus>>(emptyMap())
+    val exportStatus: StateFlow<Map<ExportTarget, ProviderStatus>> = _exportStatus.asStateFlow()
+
+    val signingSha1: String? by lazy { container.exporter.signingSha1() }
+
+    fun updateExport(transform: (ExportSettings) -> ExportSettings) = update { it.copy(export = transform(it.export)) }
+
+    fun saveExportSecret(secret: ExportSecret, value: String) {
+        viewModelScope.launch(Dispatchers.IO) { container.secrets.setSecret(secret, value) }
+    }
+
+    fun testExport(target: ExportTarget) {
+        _exportStatus.update { it + (target to ProviderStatus.Working) }
+        viewModelScope.launch {
+            // Let pending settings writes land before testing with them.
+            kotlinx.coroutines.delay(300)
+            val status = try {
+                val result = when (target) {
+                    ExportTarget.NOTION -> container.exporter.testNotion()
+                    ExportTarget.AFFINE -> container.exporter.testAffine()
+                    ExportTarget.CALDAV -> container.exporter.testCaldav()
+                    ExportTarget.EMAIL, ExportTarget.GOOGLE_DOCS -> null
+                }
+                ProviderStatus.Ok(result?.message ?: "Ready")
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                ProviderStatus.Failed(e.exportMessage())
+            }
+            _exportStatus.update { it + (target to status) }
+        }
+    }
 
     private val _status = MutableStateFlow<Map<ProviderId, ProviderStatus>>(emptyMap())
     val status: StateFlow<Map<ProviderId, ProviderStatus>> = _status.asStateFlow()

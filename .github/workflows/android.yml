@@ -5,10 +5,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -25,14 +28,66 @@ jobs:
           path: app/libs
           key: sherpa-onnx-${{ hashFiles('app/build.gradle.kts') }}
 
+      # A stable signing key lets new builds install as updates over old ones. Prefer the
+      # KALISCRIBER_KEYSTORE_BASE64 / KALISCRIBER_KEYSTORE_PASSWORD secrets; without them a CI key is
+      # generated once and kept in the Actions cache.
+      - name: Restore CI signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.kaliscriber/signing.jks
+          key: kaliscriber-signing-v1
+
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KALISCRIBER_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KALISCRIBER_KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p ~/.kaliscriber
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > ~/.kaliscriber/release.jks
+            echo "KALISCRIBER_KEYSTORE=$HOME/.kaliscriber/release.jks" >> "$GITHUB_ENV"
+            echo "KALISCRIBER_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          else
+            if [ ! -f ~/.kaliscriber/signing.jks ]; then
+              keytool -genkeypair -keystore ~/.kaliscriber/signing.jks -storepass kaliscriber-ci -keypass kaliscriber-ci \
+                -alias kaliscriber -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=KaliScriber CI build"
+            fi
+            echo "KALISCRIBER_KEYSTORE=$HOME/.kaliscriber/signing.jks" >> "$GITHUB_ENV"
+            echo "KALISCRIBER_KEYSTORE_PASSWORD=kaliscriber-ci" >> "$GITHUB_ENV"
+          fi
+
       - name: Unit tests (core)
         run: ./gradlew :core:test --stacktrace
 
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+      - name: Build APKs
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
+
+      - name: Name the release APK
+        id: apk
+        run: |
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          NAME="kaliscriber-${VERSION}-build${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          keytool -printcert -jarfile "$NAME" | grep -E "SHA1|SHA256" || true
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kaliscriber-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: kaliscriber-apks
+          path: |
+            ${{ steps.apk.outputs.name }}
+            app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: KaliScriber ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
+          prerelease: true
+          files: ${{ steps.apk.outputs.name }}
+          body: |
+            Android APK built from ${{ github.sha }}.
+            Install by opening the APK on your phone (allow installs from your browser or file manager).

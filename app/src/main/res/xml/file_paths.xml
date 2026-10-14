@@ -2,4 +2,6 @@
 <paths>
     <!-- Meeting audio, so recordings and audio briefings can be shared. -->
     <files-path name="audio" path="audio/" />
+    <!-- Generated export files (e.g. .docx for Google Docs). -->
+    <cache-path name="exports" path="exports/" />
 </paths>

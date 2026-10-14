@@ -16,8 +16,8 @@ android {
         applicationId = "com.kaliscriber.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         ndk {
             // sherpa-onnx ships native libraries; skip 32-bit x86 to keep the APK smaller.
@@ -25,11 +25,24 @@ android {
         }
     }
 
+    // Release signing comes from the environment (CI secret or a local keystore), so the key never
+    // lives in the repository. Without it, release builds fall back to the debug key.
+    val releaseKeystore = System.getenv("KALISCRIBER_KEYSTORE")?.let(::file)?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("kaliscriber") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("KALISCRIBER_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KALISCRIBER_KEY_ALIAS") ?: "kaliscriber"
+                keyPassword = System.getenv("KALISCRIBER_KEY_PASSWORD") ?: System.getenv("KALISCRIBER_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so release builds install out of the box; use your own key to publish.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("kaliscriber") ?: signingConfigs.getByName("debug")
         }
     }
 
@@ -91,6 +104,7 @@ dependencies {
     implementation(project(":core"))
     implementation(files(sherpaOnnxAar))
     implementation(libs.commons.compress)
+    implementation(libs.play.services.auth)
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.core.ktx)

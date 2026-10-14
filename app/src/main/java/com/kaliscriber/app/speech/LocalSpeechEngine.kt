@@ -12,6 +12,7 @@ import com.k2fsa.sherpa.onnx.OfflineSpeakerSegmentationPyannoteModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
+import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
@@ -24,6 +25,7 @@ import com.kaliscriber.core.ai.stt.SpeakerDiarizer
 import com.kaliscriber.core.ai.stt.SpeakerTurn
 import com.kaliscriber.core.ai.stt.SttClient
 import com.kaliscriber.core.ai.stt.SttResult
+import com.kaliscriber.core.ai.stt.VoiceEmbedder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -41,12 +43,13 @@ import java.io.File
 class LocalSpeechEngine(
     private val models: ModelManager,
     private val settings: () -> AppSettings,
-) : SttClient, SpeakerDiarizer {
+) : SttClient, SpeakerDiarizer, VoiceEmbedder {
 
     override val config: ProviderConfig get() = settings().configFor(ProviderId.LOCAL, null)
     override val supportsDiarization: Boolean = false
     override val maxUploadBytes: Long = Long.MAX_VALUE
     override val diarizationAvailable: Boolean get() = models.diarizationReady
+    override val voiceEmbeddingAvailable: Boolean get() = models.isReady(ModelCatalog.embedding)
 
     // Native objects are not thread-safe; one recognition at a time.
     private val lock = Mutex()
@@ -59,7 +62,7 @@ class LocalSpeechEngine(
         return chosen?.takeIf(models::isReady) ?: models.readyAsrModels().firstOrNull()
     }
 
-    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?): SttResult =
+    override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?, speakers: Int?): SttResult =
         withContext(Dispatchers.Default) {
             lock.withLock {
                 val model = selectedModel()
@@ -215,7 +218,7 @@ class LocalSpeechEngine(
         return created
     }
 
-    override suspend fun diarize(audio: File): List<SpeakerTurn> = withContext(Dispatchers.Default) {
+    override suspend fun diarize(audio: File, speakers: Int?): List<SpeakerTurn> = withContext(Dispatchers.Default) {
         lock.withLock {
             if (!models.diarizationReady) return@withLock emptyList()
             // The whole meeting must be in memory at once; stay well inside the heap.
@@ -236,7 +239,8 @@ class LocalSpeechEngine(
                     model = models.file(ModelCatalog.embedding, ".onnx").absolutePath,
                     numThreads = threads,
                 ),
-                clustering = FastClusteringConfig(numClusters = -1, threshold = 0.5f),
+                // A known speaker count beats threshold-based clustering.
+                clustering = FastClusteringConfig(numClusters = speakers ?: -1, threshold = 0.5f),
                 minDurationOn = 0.3f,
                 minDurationOff = 0.5f,
             )
@@ -249,6 +253,74 @@ class LocalSpeechEngine(
                 diarizer.release()
             }
         }
+    }
+
+    /**
+     * Voiceprints for each speaker from the given time spans. Only those stretches of audio are kept
+     * in memory while the file is decoded.
+     */
+    override suspend fun embed(audio: File, spans: Map<String, List<LongRange>>): Map<String, FloatArray> =
+        withContext(Dispatchers.Default) {
+            lock.withLock {
+                if (!voiceEmbeddingAvailable || spans.isEmpty()) return@withLock emptyMap()
+                val rate = AudioDecoder.SAMPLE_RATE.toLong()
+                // (startSample, endSample, speakerId), sorted, so the decoder can be streamed once.
+                val ranges = spans.flatMap { (speaker, list) ->
+                    list.map { Triple(it.first * rate / 1000, it.last * rate / 1000, speaker) }
+                }.sortedBy { it.first }
+                val collected = spans.keys.associateWith { FloatArrayBuilder() }
+                var offset = 0L
+                AudioDecoder.decode(audio) { block ->
+                    val blockEnd = offset + block.size
+                    for ((start, end, speaker) in ranges) {
+                        if (start >= blockEnd) break
+                        if (end <= offset) continue
+                        val from = (maxOf(start, offset) - offset).toInt()
+                        val to = (minOf(end, blockEnd) - offset).toInt()
+                        collected.getValue(speaker).append(block, from, to)
+                    }
+                    offset = blockEnd
+                }
+                val extractor = SpeakerEmbeddingExtractor(
+                    null,
+                    SpeakerEmbeddingExtractorConfig(
+                        model = models.file(ModelCatalog.embedding, ".onnx").absolutePath,
+                        numThreads = threads,
+                    ),
+                )
+                try {
+                    collected.mapNotNull { (speaker, samples) ->
+                        if (samples.size < AudioDecoder.SAMPLE_RATE) return@mapNotNull null
+                        val stream = extractor.createStream()
+                        try {
+                            stream.acceptWaveform(samples.toArray(), AudioDecoder.SAMPLE_RATE)
+                            stream.inputFinished()
+                            if (!extractor.isReady(stream)) return@mapNotNull null
+                            speaker to extractor.compute(stream)
+                        } finally {
+                            stream.release()
+                        }
+                    }.toMap()
+                } finally {
+                    extractor.release()
+                }
+            }
+        }
+
+    private class FloatArrayBuilder {
+        private var data = FloatArray(AudioDecoder.SAMPLE_RATE * 10)
+        var size = 0
+            private set
+
+        fun append(source: FloatArray, from: Int, to: Int) {
+            val n = to - from
+            if (n <= 0) return
+            if (size + n > data.size) data = data.copyOf(maxOf(data.size * 2, size + n))
+            System.arraycopy(source, from, data, size, n)
+            size += n
+        }
+
+        fun toArray(): FloatArray = data.copyOf(size)
     }
 
     /** Frees the loaded recognizer, e.g. after the model was changed or deleted. */

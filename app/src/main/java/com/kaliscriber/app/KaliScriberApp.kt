@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import com.kaliscriber.app.data.SecretStore
+import com.kaliscriber.app.export.MeetingExporter
 import com.kaliscriber.app.recording.RecordingManager
 import com.kaliscriber.app.speech.LocalSpeechEngine
 import com.kaliscriber.app.speech.ModelManager
@@ -18,6 +19,8 @@ import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
 import com.kaliscriber.core.pipeline.MeetingPipeline
+import com.kaliscriber.core.speakers.VoiceLibrary
+import com.kaliscriber.core.speakers.VoiceProfile
 import com.kaliscriber.core.store.JsonDocumentStore
 import com.kaliscriber.core.store.JsonValueStore
 import com.kaliscriber.core.store.MeetingRepository
@@ -26,6 +29,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
 
 class KaliScriberApp : Application() {
@@ -76,7 +80,16 @@ class AppContainer(context: Context) {
         audioRoot = File(filesDir, "audio"),
     )
     val notes = NoteRepository(JsonDocumentStore(File(filesDir, "notes"), Note.serializer()) { it.id })
-    val pipeline = MeetingPipeline(meetings, ai, meetingAi, settings)
+    /** Remembered voices (on-device voiceprints) for recognising people across meetings. */
+    val voices = VoiceLibrary(
+        JsonValueStore(File(filesDir, "voices.json"), ListSerializer(VoiceProfile.serializer()), emptyList()),
+    )
+    val pipeline = MeetingPipeline(
+        meetings, ai, meetingAi, settings,
+        voices = voices,
+        embedder = { localSpeech },
+    )
+    val exporter = MeetingExporter(appContext, http, secrets, settings)
     val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope)
 
     init {

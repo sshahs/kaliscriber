@@ -13,6 +13,20 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - **Gaps & questions:** the AI finds what's missing (tasks without owners or deadlines, vague references, unanswered questions…) and asks *you* questions. Your answers are stored with the meeting and fed back into the summary and Ask AI.
 - Play the recording with the transcript following along, edit lines, import existing audio files, share as Markdown, or save as a note.
 
+**Speakers**
+- **Voice memory:** name a speaker once and the app recognises their voice in later meetings. Voiceprints are computed and stored only on the phone (Settings → Voice memory).
+- **How many people?** Set the number of participants while recording or afterwards, then tap *Re-detect speakers* for more accurate speaker separation.
+
+**During a meeting**
+- *Ask AI about the meeting so far* from the recording screen, e.g. "Catch me up on the last five minutes" or "What should I clarify right now?". Recording continues in the background.
+
+**Export** (the share icon on a meeting)
+- **Email:** the notes as plain text to your default recipients.
+- **Google Docs:** opens the notes in the Google Docs app as a Word file. One-tap upload to Drive is optional (see below).
+- **Notion:** creates a page under a parent page you choose, with headings, bullets and to-dos.
+- **AFFiNE:** creates a doc through the workspace MCP endpoint. If your server doesn't allow writing yet, the notes are copied and AFFiNE is opened so you can paste them.
+- **Baikal / CalDAV:** adds the meeting as a calendar event and each action item as a task (with due date and priority). Exporting again updates the same items.
+
 **Notes**
 - Type or dictate notes, then have AI tidy them up, summarise them, extract action items, find gaps and questions, suggest a title, or follow your own instruction.
 
@@ -70,6 +84,21 @@ mic ─► AudioRecord (16 kHz PCM) ─┬─► AAC encoder ─► recording.m4
 
 - `core/`: a plain Kotlin/JVM module with all provider clients (OkHttp + kotlinx.serialization), prompts, speaker logic, the meeting pipeline and JSON file storage. It is unit-tested with MockWebServer.
 - `app/`: the Android app in Jetpack Compose and Material 3: recording service and audio engine, Keystore secret storage, and the screens.
+
+## Download
+
+Every push to `main` publishes a signed APK on the [Releases page](https://github.com/sshahs/kaliscriber/releases). Open it on your phone to install (Android 8.0+). Builds share a signing key, so newer ones install as updates.
+
+For a signing key you control, add `KALISCRIBER_KEYSTORE_BASE64` (a base64-encoded keystore with alias `kaliscriber`) and `KALISCRIBER_KEYSTORE_PASSWORD` as repository secrets.
+
+### Export setup
+
+| Target | What you need |
+|---|---|
+| Notion | An internal integration secret (notion.so/profile/integrations), and the parent page connected to that integration |
+| AFFiNE | Workspace id and a read-write MCP token (workspace settings → Integrations → MCP Server) |
+| Baikal / CalDAV | Calendar URL such as `https://<server>/dav.php/calendars/<user>/<calendar>/`, plus username and password (Basic and Digest auth are supported) |
+| Google Docs upload | Optional: an Android OAuth client for package `com.kaliscriber.app` with the SHA-1 shown in Settings, and the Drive API enabled. Without it, notes open in Google Docs as a Word file |
 
 ## Build
 

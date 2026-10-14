@@ -7,6 +7,19 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Apps the export features hand notes to (package visibility, Android 11+). -->
+    <queries>
+        <package android:name="com.google.android.apps.docs.editors.docs" />
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        </intent>
+    </queries>
+
     <application
         android:name=".KaliScriberApp"
         android:allowBackup="false"

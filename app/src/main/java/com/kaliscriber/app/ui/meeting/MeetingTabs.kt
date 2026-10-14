@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
+import com.kaliscriber.app.ui.recording.ExpectedSpeakersRow
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -325,6 +326,23 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, onAskAboutSelection: (
 
     Column(Modifier.fillMaxSize()) {
         SpeakersRow(meeting, onSpeakerClick = { speakerDialog = it })
+        if (meeting.status != MeetingStatus.RECORDING) {
+            var showCount by remember { mutableStateOf(false) }
+            Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { showCount = !showCount }) {
+                    Text("People: ${meeting.expectedSpeakers?.toString() ?: "auto"}")
+                }
+                TextButton(onClick = vm::redetectSpeakers, enabled = !meeting.isProcessing) {
+                    Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Re-detect speakers")
+                }
+            }
+            if (showCount) {
+                ExpectedSpeakersRow(meeting.expectedSpeakers, onSelect = { vm.setExpectedSpeakers(it) })
+                Spacer(Modifier.size(4.dp))
+            }
+        }
         HorizontalDivider()
         if (selection.isNotEmpty()) {
             Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
@@ -464,6 +482,13 @@ private fun SpeakerDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 val lines = meeting.segments.count { it.speakerId == speaker.id }
+                if (speaker.voiceProfileId != null && !speaker.isPlaceholder) {
+                    Text(
+                        "Recognised from your saved voices. Renaming updates the saved voice.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 Text(
                     if (speaker.isPlaceholder) "A placeholder name for a speaker the app couldn't identify ($lines lines)."
                     else "$lines lines in this meeting.",
@@ -603,7 +628,12 @@ fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                val suggestions = buildList {
+                val suggestions = if (meeting.status == MeetingStatus.RECORDING) listOf(
+                    "Catch me up on the last five minutes",
+                    "What has been decided so far?",
+                    "What should I ask or clarify right now?",
+                    "Who has committed to what so far?",
+                ) else buildList {
                     add("What were the key decisions and who made them?")
                     add("What did each person commit to?")
                     add("What was left unresolved?")
