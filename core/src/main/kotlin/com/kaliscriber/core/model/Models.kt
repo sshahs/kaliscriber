@@ -67,7 +67,16 @@ data class TranscriptSegment(
     val text: String,
     val speakerId: String? = null,
     val confidence: Float? = null,
+    /**
+     * Word timings from on-device recognition, used to split a segment where the speaker changes.
+     * Each word's text keeps its leading space, so joining them gives back [text]. Dropped on edits.
+     */
+    val words: List<WordTiming>? = null,
 )
+
+/** When a recognized word starts (ms into the meeting) and its text. */
+@Serializable
+data class WordTiming(val startMs: Long, val text: String)
 
 /** A short spoken recap of the meeting, and the audio file it was rendered to. */
 @Serializable

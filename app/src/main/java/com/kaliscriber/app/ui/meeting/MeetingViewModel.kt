@@ -86,7 +86,7 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     fun generateInsights() = launchTask(Busy.INSIGHTS) { pipeline.generateInsights(meetingId) }
     fun generateGaps() = launchTask(Busy.GAPS) { pipeline.generateGaps(meetingId) }
     fun refreshWithAnswers() = launchTask(Busy.INSIGHTS, "Summary updated with your answers") { pipeline.refreshWithAnswers(meetingId) }
-    fun separateSpeakers() = launchTask(Busy.SPEAKERS, "Speakers re-detected") { pipeline.separateSpeakers(meetingId) }
+    fun separateSpeakers() = launchTask(Busy.SPEAKERS, "Speakers re-detected") { pipeline.redetectSpeakers(meetingId, aiOnly = true) }
     fun suggestNames() = launchTask(Busy.NAMES, "Name suggestions updated") { pipeline.suggestSpeakerNames(meetingId) }
     fun retryPending() = launchTask(Busy.RETRY) {
         pipeline.retryPendingChunks(meetingId)
@@ -249,6 +249,9 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     fun renameSpeaker(speakerId: String, name: String) = viewModelScope.launch { pipeline.renameSpeaker(meetingId, speakerId, name) }
 
     fun setExpectedSpeakers(count: Int?) = viewModelScope.launch { pipeline.setExpectedSpeakers(meetingId, count) }
+
+    /** MB still to download for on-device speaker detection, or null when it is ready or not used. */
+    val speakerPackDownloadMb: Int? get() = if (container.speakerPackMissing) container.models.diarizationDownloadMb else null
 
     fun redetectSpeakers() = launchTask(Busy.SPEAKERS, "Speakers detected again") { pipeline.redetectSpeakers(meetingId) }
 

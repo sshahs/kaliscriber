@@ -3,6 +3,7 @@ package com.kaliscriber.core.ai.stt
 import com.kaliscriber.core.ai.ApiKind
 import com.kaliscriber.core.ai.ProviderConfig
 import com.kaliscriber.core.ai.ProviderId
+import com.kaliscriber.core.model.WordTiming
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -16,6 +17,8 @@ data class RawSegment(
     /** Provider speaker label, or null when the provider could not tell. */
     val speakerLabel: String? = null,
     val confidence: Float? = null,
+    /** Word timings relative to the audio given to the recognizer, when the engine provides them. */
+    val words: List<WordTiming>? = null,
 )
 
 data class SttResult(

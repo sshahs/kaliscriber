@@ -50,6 +50,11 @@ class MeetingPipeline(
     private val embedder: () -> VoiceEmbedder? = { null },
     /** Receives a line per processing step with its duration, for the platform log. */
     private val log: (String) -> Unit = {},
+    /**
+     * Fetches the on-device speaker detection models when they are missing, reporting progress.
+     * Throws if that fails.
+     */
+    private val fetchDiarizationModels: suspend (onProgress: suspend (Float) -> Unit) -> Unit = {},
 ) {
 
     /** Shows what processing is doing on the meeting, and logs how long each step takes. */
@@ -203,7 +208,26 @@ class MeetingPipeline(
     /** Runs the on-device diarizer over [audioFile] and relabels the transcript. True if it ran. */
     private suspend fun applyLocalDiarization(meetingId: String, audioFile: File): Boolean {
         val diarizer = runCatching { ai.stt() }.getOrNull() as? SpeakerDiarizer ?: return false
-        if (!settings().localDiarization || !diarizer.diarizationAvailable) return false
+        if (!settings().localDiarization) return false
+        if (!diarizer.diarizationAvailable) {
+            try {
+                var last = -1f
+                stage(meetingId, "Downloading speaker detection") {
+                    fetchDiarizationModels { fraction ->
+                        if (fraction - last >= 0.02f || fraction >= 1f) {
+                            last = fraction
+                            progress(meetingId, fraction)
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                repo.update(meetingId) { it.copy(lastError = "Couldn't download speaker detection: ${describe(e)}") }
+                return false
+            }
+            if (!diarizer.diarizationAvailable) return false
+        }
         return try {
             val turns = stage(meetingId, "Detecting speakers on this phone") {
                 coroutineScope {
@@ -265,7 +289,9 @@ class MeetingPipeline(
         repo.update(meetingId) { it.copy(status = MeetingStatus.ANALYZING) }
 
         if (s.llmSpeakerSeparation && needsSpeakerSeparation(meeting)) {
-            step(errors, "Speaker separation") { stage(meetingId, "Separating speakers with AI") { separateSpeakers(meetingId) } }
+            step(errors, "Speaker separation") {
+                stage(meetingId, "Separating speakers with AI") { separateSpeakers(meetingId) }?.let { errors += it }
+            }
         }
         if (s.rememberVoices) {
             step(errors, "Voice recognition") { stage(meetingId, "Recognising saved voices") { recognizeVoices(meetingId) } }
@@ -410,19 +436,20 @@ class MeetingPipeline(
     /**
      * Detects speakers again, e.g. after the expected number of speakers changed: on-device
      * diarization when available, else a diarizing transcription service, else the AI model.
-     * Then recognises saved voices and suggests names.
+     * Then recognises saved voices and suggests names. [aiOnly] goes straight to the AI model.
      */
-    suspend fun redetectSpeakers(meetingId: String) {
+    suspend fun redetectSpeakers(meetingId: String, aiOnly: Boolean = false) {
         val meeting = repo.get(meetingId) ?: return
         if (meeting.segments.isEmpty()) throw AiException("There is no transcript yet.")
         val audio = meeting.audioPath?.let(::File)?.takeIf { it.exists() }
         val onDevice = runCatching { ai.stt() }.getOrNull() as? SpeakerDiarizer
         repo.update(meetingId) { it.copy(status = MeetingStatus.ANALYZING, lastError = null) }
         try {
-            val done = audio != null && tryFullDiarization(meetingId, audio, meeting.durationMs)
+            val done = !aiOnly && audio != null && tryFullDiarization(meetingId, audio, meeting.durationMs)
+            val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
             if (!done) {
                 try {
-                    stage(meetingId, "Separating speakers with AI") { separateSpeakers(meetingId) }
+                    stage(meetingId, "Separating speakers with AI") { separateSpeakers(meetingId) }?.let { errors += it }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -434,7 +461,6 @@ class MeetingPipeline(
                     throw AiException("Couldn't re-detect speakers: ${describe(e)}$hint", cause = e)
                 }
             }
-            val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
             if (settings().rememberVoices) {
                 step(errors, "Voice recognition") { stage(meetingId, "Recognising saved voices") { recognizeVoices(meetingId) } }
             }
@@ -450,11 +476,19 @@ class MeetingPipeline(
         }
     }
 
-    suspend fun separateSpeakers(meetingId: String) {
-        val meeting = repo.get(meetingId) ?: return
-        val result = meetingAi.separateSpeakers(meeting)
-        if (result.segments.isEmpty()) return
+    /** Separates speakers with the AI model. Returns a note when some parts of the meeting could not be done. */
+    suspend fun separateSpeakers(meetingId: String): String? {
+        val meeting = repo.get(meetingId) ?: return null
+        val separation = meetingAi.separateSpeakers(meeting) { progress(meetingId, it) }
+        val result = separation.result
+        if (result.segments.isEmpty()) return null
         repo.update(meetingId) { it.copy(speakers = result.speakers, segments = result.segments, speakersFinal = true) }
+        return if (separation.failedParts > 0) {
+            "The AI couldn't separate speakers in ${separation.failedParts} of ${separation.parts} parts of the meeting " +
+                "(${separation.error ?: "no reason given"}); those lines stay unassigned."
+        } else {
+            null
+        }
     }
 
     suspend fun suggestSpeakerNames(meetingId: String) {

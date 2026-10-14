@@ -48,7 +48,7 @@ class FakeLocalStt(
     val files = mutableListOf<File>()
     override val config = AppSettings().configFor(ProviderId.LOCAL, null)
     override val supportsDiarization = false
-    override val diarizationAvailable = true
+    override var diarizationAvailable = true
     override suspend fun transcribe(audio: File, language: String?, durationHintMs: Long?, speakers: Int?): SttResult {
         files += audio
         return respond(audio)

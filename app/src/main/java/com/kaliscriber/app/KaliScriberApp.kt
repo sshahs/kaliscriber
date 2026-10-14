@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.net.ConnectivityManager
 import android.util.Log
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.app.export.MeetingExporter
@@ -14,6 +15,7 @@ import com.kaliscriber.app.speech.SpeechOutput
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.DefaultAiServices
 import com.kaliscriber.core.ai.MeetingAi
+import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.ai.defaultHttpClient
 import com.kaliscriber.core.model.AudioChunk
 import com.kaliscriber.core.model.Meeting
@@ -90,11 +92,22 @@ class AppContainer(context: Context) {
         voices = voices,
         embedder = { localSpeech },
         log = { message -> Log.i("KaliScriber", message) },
+        fetchDiarizationModels = { onProgress -> models.awaitDiarization(onProgress) },
     )
     val exporter = MeetingExporter(appContext, http, secrets, settings)
-    val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope)
+    val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope, onStart = {
+        // Start fetching speaker detection now so it is ready when the meeting ends.
+        if (speakerPackMissing) models.downloadDiarization()
+    })
+
+    /** True when on-device speaker detection is wanted but its models are not on the phone yet. */
+    val speakerPackMissing: Boolean
+        get() = settings().let { it.sttProvider == ProviderId.LOCAL && it.localDiarization } && !models.diarizationReady
 
     init {
+        // Speech models downloaded before the speaker pack came bundled with them: fetch it on Wi-Fi.
+        val metered = runCatching { appContext.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered }.getOrDefault(true)
+        if (speakerPackMissing && models.readyAsrModels().isNotEmpty() && !metered) models.downloadDiarization()
         scope.launch {
             meetings.load()
             notes.load()

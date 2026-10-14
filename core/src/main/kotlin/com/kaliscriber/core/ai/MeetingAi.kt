@@ -21,6 +21,7 @@ import com.kaliscriber.core.speakers.SpeakerAssigner
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -181,18 +182,30 @@ class MeetingAi(
         }
     }
 
+    /** Outcome of [separateSpeakers]: the relabelled transcript, and how many parts the AI could not do. */
+    class Separation(val result: SpeakerAssigner.Result, val parts: Int, val failedParts: Int, val error: String?)
+
     /**
      * Uses the LLM to split an unlabelled transcript into speaker turns. Returns new speakers and
-     * segments; existing named (non-placeholder) speakers are kept.
+     * segments; existing named (non-placeholder) speakers are kept. Long transcripts go in parts;
+     * a part that fails twice keeps its lines unassigned instead of losing the whole meeting.
      */
-    suspend fun separateSpeakers(meeting: Meeting, windowChars: Int = 6_000): SpeakerAssigner.Result {
+    suspend fun separateSpeakers(
+        meeting: Meeting,
+        windowChars: Int = 6_000,
+        onProgress: suspend (Float) -> Unit = {},
+    ): Separation {
         requireTranscript(meeting)
         val keptSpeakers = meeting.speakers.filter { !it.isPlaceholder && meeting.segments.any { s -> s.speakerId == it.id } }
         val speakers = keptSpeakers.toMutableList()
         val out = mutableListOf<TranscriptSegment>()
         val labelToSpeaker = mutableMapOf<String, Speaker>()
+        val parts = windows(meeting.segments, windowChars)
+        var failed = 0
+        var lastError: Exception? = null
 
-        for (window in windows(meeting.segments, windowChars)) {
+        for ((partIndex, window) in parts.withIndex()) {
+            onProgress(partIndex.toFloat() / parts.size)
             val user = buildString {
                 if (labelToSpeaker.isNotEmpty()) {
                     appendLine("Speakers established so far, with a recent line from each:")
@@ -206,8 +219,22 @@ class MeetingAi(
                 appendLine("Segments:")
                 window.forEachIndexed { i, seg -> appendLine("$i| ${seg.text.replace('\n', ' ')}") }
             }
-            val obj = json(Prompts.SEPARATE_SPEAKERS_SYSTEM, user)
-            val turns = obj.list("turns", "assignments").mapNotNull { el ->
+            val obj = try {
+                json(Prompts.SEPARATE_SPEAKERS_SYSTEM, user)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                try {
+                    json(Prompts.SEPARATE_SPEAKERS_SYSTEM, user)
+                } catch (e2: CancellationException) {
+                    throw e2
+                } catch (e2: Exception) {
+                    failed++
+                    lastError = e2
+                    null
+                }
+            }
+            val turns = obj?.list("turns", "assignments").orEmpty().mapNotNull { el ->
                 val t = el as? JsonObject ?: return@mapNotNull null
                 val index = (t["i"] as? JsonPrimitive)?.intOrNull ?: (t["index"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
                     ?: return@mapNotNull null
@@ -228,8 +255,15 @@ class MeetingAi(
                 }
             }
         }
+        onProgress(1f)
+        if (failed == parts.size) throw lastError ?: AiException("The AI could not separate the speakers.")
         val used = out.mapNotNull { it.speakerId }.toSet()
-        return SpeakerAssigner.Result(speakers.filter { it.id in used }, out)
+        return Separation(
+            SpeakerAssigner.Result(speakers.filter { it.id in used }, out),
+            parts = parts.size,
+            failedParts = failed,
+            error = lastError?.message,
+        )
     }
 
     private data class Turn(val index: Int, val label: String, val from: String?)
@@ -257,7 +291,7 @@ class MeetingAi(
             val end = if (i == cuts.lastIndex) text.length else cuts[i + 1].first
             val startMs = seg.startMs + span * start / total
             val endMs = if (i == cuts.lastIndex) seg.endMs else seg.startMs + span * end / total
-            label to seg.copy(id = Ids.new(), startMs = startMs, endMs = endMs, text = text.substring(start, end).trim())
+            label to seg.copy(id = Ids.new(), startMs = startMs, endMs = endMs, text = text.substring(start, end).trim(), words = null)
         }.filter { it.second.text.isNotEmpty() }
     }
 

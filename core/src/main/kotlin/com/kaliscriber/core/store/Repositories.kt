@@ -114,7 +114,7 @@ class MeetingRepository(
     }
 
     suspend fun editSegment(meetingId: String, segmentId: String, text: String) = update(meetingId) { m ->
-        m.copy(segments = m.segments.map { if (it.id == segmentId) it.copy(text = text) else it })
+        m.copy(segments = m.segments.map { if (it.id == segmentId) it.copy(text = text, words = null) else it })
     }
 
     suspend fun deleteSegment(meetingId: String, segmentId: String) = update(meetingId) { m ->

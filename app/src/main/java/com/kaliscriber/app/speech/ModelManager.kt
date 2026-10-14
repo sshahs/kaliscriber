@@ -9,6 +9,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,9 +61,15 @@ class ModelManager(context: Context, http: OkHttpClient, private val scope: Coro
         dir(model).listFiles().orEmpty().firstOrNull { it.name.endsWith(suffix) }
             ?: throw IOException("${model.name} is missing $suffix. Delete and download it again.")
 
-    /** Downloads [model] (and the voice detector every recognizer needs). */
+    /**
+     * Downloads [model]. A speech recognizer also brings the voice detector it needs and the speaker
+     * detection pack, without which every meeting would come out as a single speaker.
+     */
     fun download(model: LocalModel) {
-        if (model.role == ModelRole.ASR && !isReady(ModelCatalog.vad)) download(ModelCatalog.vad)
+        if (model.role == ModelRole.ASR) {
+            if (!isReady(ModelCatalog.vad)) download(ModelCatalog.vad)
+            downloadDiarization()
+        }
         synchronized(jobs) {
             if (jobs[model.id]?.isActive == true || isReady(model)) return
             setState(model, ModelState.Downloading(0f))
@@ -82,7 +89,37 @@ class ModelManager(context: Context, http: OkHttpClient, private val scope: Coro
         }
     }
 
-    fun downloadDiarization() = ModelCatalog.diarization.forEach(::download)
+    fun downloadDiarization() = ModelCatalog.diarization.filterNot(::isReady).forEach(::download)
+
+    /** Size of the speaker detection pack still to download, in MB. */
+    val diarizationDownloadMb: Int get() = ModelCatalog.diarization.filterNot(::isReady).sumOf { it.downloadMb }
+
+    /**
+     * Downloads the speaker detection pack if needed and waits for it, reporting overall progress.
+     * Throws if a download fails.
+     */
+    suspend fun awaitDiarization(onProgress: suspend (Float) -> Unit) {
+        if (diarizationReady) return
+        downloadDiarization()
+        val pack = ModelCatalog.diarization
+        val weights = pack.associate { it.id to it.downloadMb.coerceAtLeast(1).toFloat() }
+        val done = states.first { all ->
+            val list = pack.map { all[it.id] }
+            list.filterIsInstance<ModelState.Failed>().firstOrNull()?.let { throw IOException("Speaker detection download failed: ${it.message}") }
+            val progress = pack.sumOf { m ->
+                when (val st = all[m.id]) {
+                    is ModelState.Ready -> weights.getValue(m.id).toDouble()
+                    is ModelState.Downloading -> (st.progress * weights.getValue(m.id)).toDouble()
+                    else -> 0.0
+                }
+            } / weights.values.sum()
+            onProgress(progress.toFloat())
+            list.all { it is ModelState.Ready } || list.any { it is ModelState.NotDownloaded && !jobActive() }
+        }
+        if (!pack.all { done[it.id] is ModelState.Ready }) throw IOException("Speaker detection download was cancelled.")
+    }
+
+    private fun jobActive(): Boolean = synchronized(jobs) { ModelCatalog.diarization.any { jobs[it.id]?.isActive == true } }
 
     fun cancel(model: LocalModel) {
         synchronized(jobs) { jobs.remove(model.id)?.cancel() }

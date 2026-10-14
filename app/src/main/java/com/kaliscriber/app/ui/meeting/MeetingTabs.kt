@@ -342,6 +342,10 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, onAskAboutSelection: (
                 ExpectedSpeakersRow(meeting.expectedSpeakers, onSelect = { vm.setExpectedSpeakers(it) })
                 Spacer(Modifier.size(4.dp))
             }
+            val voices = meeting.segments.mapNotNull { it.speakerId }.distinct().size
+            if (voices <= 1 && meeting.durationMs >= ONE_SPEAKER_HINT_MS && meeting.expectedSpeakers != 1 && !meeting.isProcessing) {
+                OneSpeakerCard(meeting, vm)
+            }
         }
         HorizontalDivider()
         if (selection.isNotEmpty()) {
@@ -877,6 +881,37 @@ fun GapsTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onAsk: (Str
                 OutlinedButton(onClick = vm::generateGaps, enabled = Busy.GAPS !in busy) {
                     Text(if (Busy.GAPS in busy) "Looking…" else "Find more")
                 }
+            }
+        }
+    }
+}
+
+private const val ONE_SPEAKER_HINT_MS = 3 * 60_000L
+
+/** Shown when a meeting of some length came out as a single speaker, which is rarely right. */
+@Composable
+private fun OneSpeakerCard(meeting: Meeting, vm: MeetingViewModel) {
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val downloadMb = vm.speakerPackDownloadMb
+    Card(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("Everyone is under one speaker", style = MaterialTheme.typography.titleSmall)
+            Text(
+                buildString {
+                    append("How many people were in this meeting? Pick the number, then detect speakers again.")
+                    if (downloadMb != null) append(" Speaker detection ($downloadMb MB) downloads first and then runs on this phone.")
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.size(8.dp))
+            ExpectedSpeakersRow(meeting.expectedSpeakers, onSelect = { vm.setExpectedSpeakers(it) })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = vm::redetectSpeakers, enabled = Busy.SPEAKERS !in busy) { Text("Detect speakers") }
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = { vm.setExpectedSpeakers(1) }) { Text("It was just me") }
             }
         }
     }

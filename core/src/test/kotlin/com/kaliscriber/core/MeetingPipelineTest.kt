@@ -1,5 +1,6 @@
 package com.kaliscriber.core
 
+import com.kaliscriber.core.ai.AiException
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.MeetingAi
 import com.kaliscriber.core.ai.Prompts
@@ -55,8 +56,8 @@ class MeetingPipelineTest {
         }
     }
 
-    private fun pipeline(ai: FakeAi) = MeetingPipeline(
-        repo, ai, MeetingAi(ai, { settings }), { settings }, random = Random(1),
+    private fun pipeline(ai: FakeAi, fetchModels: suspend (suspend (Float) -> Unit) -> Unit = {}) = MeetingPipeline(
+        repo, ai, MeetingAi(ai, { settings }), { settings }, random = Random(1), fetchDiarizationModels = fetchModels,
     )
 
     private fun chunkFile(name: String) = File(root, name).apply { writeBytes(ByteArray(10)) }
@@ -288,6 +289,58 @@ class MeetingPipelineTest {
         assertEquals(m.segments[0].speakerId, m.segments[2].speakerId)
         assertTrue(m.segments[0].speakerId != m.segments[1].speakerId)
         assertTrue((ai.llm as FakeLlm).requests.none { it.system == Prompts.SEPARATE_SPEAKERS_SYSTEM })
+    }
+
+    @Test
+    fun `missing speaker models are fetched before on-device detection`() = runTest {
+        val turns = listOf(SpeakerTurn(0, 2_100, "0"), SpeakerTurn(2_100, 4_000, "1"))
+        val stt = FakeLocalStt(turns) {
+            SttResult(listOf(RawSegment(0, 2_000, "Hi, I'm Priya."), RawSegment(2_200, 3_900, "Hello Priya!")), diarized = false)
+        }
+        stt.diarizationAvailable = false
+        settings = settings.copy(autoAnalyze = false, suggestSpeakerNames = false)
+        var fetched = 0
+        val p = pipeline(FakeAi(llm(), stt)) { onProgress ->
+            onProgress(0.5f)
+            fetched++
+            stt.diarizationAvailable = true
+        }
+        val meeting = repo.create()
+        p.transcribeChunk(meeting.id, AudioChunk(0, chunkFile("c0.wav").path, 0, 4_000))
+        p.finishRecording(meeting.id, chunkFile("recording.m4a"), 4_000)
+
+        val m = repo.get(meeting.id)!!
+        assertEquals(1, fetched)
+        assertEquals(1, stt.diarizeCalls)
+        assertEquals(2, m.speakers.size)
+    }
+
+    @Test
+    fun `a part the ai cannot separate keeps the rest of the meeting`() = runTest {
+        val long = "word ".repeat(700)
+        val stt = FakeStt(supportsDiarization = false) {
+            SttResult(
+                listOf(RawSegment(0, 60_000, "ONE $long"), RawSegment(60_000, 120_000, "TWO $long"), RawSegment(120_000, 180_000, "THREE $long")),
+                diarized = false,
+            )
+        }
+        val flaky = FakeLlm { req ->
+            if (req.system != Prompts.SEPARATE_SPEAKERS_SYSTEM) "{}"
+            else if (req.messages.last().content.contains("| TWO")) throw AiException("timeout")
+            else """{"turns":[{"i":0,"s":"S1"}]}"""
+        }
+        settings = settings.copy(autoAnalyze = false, suggestSpeakerNames = false)
+        val p = pipeline(FakeAi(flaky, stt))
+        val meeting = repo.create()
+        p.transcribeChunk(meeting.id, AudioChunk(0, chunkFile("c0.wav").path, 0, 180_000))
+        p.finishRecording(meeting.id, null, 180_000)
+
+        val m = repo.get(meeting.id)!!
+        assertEquals(3, m.segments.size)
+        assertTrue(m.speakersFinal)
+        assertEquals(m.segments[0].speakerId, m.segments[2].speakerId)
+        assertTrue(m.lastError!!.contains("1 of 3 parts"), m.lastError)
+        assertEquals(MeetingStatus.READY, m.status)
     }
 
     @Test

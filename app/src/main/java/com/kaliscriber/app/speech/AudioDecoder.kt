@@ -40,7 +40,8 @@ object AudioDecoder {
 
     class TooLongException(val seconds: Long) : IOException("Audio is too long to process in one go (${seconds / 60} min)")
 
-    private fun estimateSamples(file: File): Long? = runCatching {
+    /** Number of 16 kHz samples the file will decode to, from its header; null if unknown. */
+    fun estimateSamples(file: File): Long? = runCatching {
         if (isPcmWav(file)) {
             val info = readWavInfo(file)
             info.dataBytes / (info.channels * 2) * SAMPLE_RATE / info.sampleRate
