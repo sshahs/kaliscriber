@@ -19,10 +19,6 @@ android {
         versionCode = 3
         versionName = "0.3.0"
 
-        ndk {
-            // sherpa-onnx ships native libraries; skip 32-bit x86 to keep the APK smaller.
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-        }
     }
 
     // Release signing comes from the environment (CI secret or a local keystore), so the key never
@@ -58,6 +54,20 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        // Compress the speech engine's native libraries: about half the download size.
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    // One small APK per CPU type (arm64 suits almost every current phone) plus a universal one.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
         }
     }
 }

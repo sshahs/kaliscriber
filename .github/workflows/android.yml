@@ -62,22 +62,22 @@ jobs:
       - name: Build APKs
         run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
 
-      - name: Name the release APK
+      - name: Name the release APKs
         id: apk
         run: |
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          NAME="kaliscriber-${VERSION}-build${{ github.run_number }}.apk"
-          cp app/build/outputs/apk/release/app-release.apk "$NAME"
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          mkdir -p release
+          for f in app/build/outputs/apk/release/app-*-release.apk; do
+            abi=$(basename "$f" | sed -E 's/^app-(.*)-release\.apk$/\1/')
+            cp "$f" "release/kaliscriber-${VERSION}-build${{ github.run_number }}-${abi}.apk"
+          done
+          ls -la release
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          keytool -printcert -jarfile "$NAME" | grep -E "SHA1|SHA256" || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: kaliscriber-apks
-          path: |
-            ${{ steps.apk.outputs.name }}
-            app/build/outputs/apk/debug/*.apk
+          path: release/*.apk
           if-no-files-found: error
 
       - name: Publish GitHub release
@@ -87,7 +87,8 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: KaliScriber ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
           prerelease: true
-          files: ${{ steps.apk.outputs.name }}
+          files: release/*.apk
           body: |
-            Android APK built from ${{ github.sha }}.
+            Android APKs built from ${{ github.sha }}.
+            Most phones: the `arm64-v8a` APK. Older 32-bit phones: `armeabi-v7a`. Emulators: `x86_64`. Not sure: `universal`.
             Install by opening the APK on your phone (allow installs from your browser or file manager).

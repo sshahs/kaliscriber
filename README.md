@@ -87,7 +87,7 @@ mic ─► AudioRecord (16 kHz PCM) ─┬─► AAC encoder ─► recording.m4
 
 ## Download
 
-Every push to `main` publishes a signed APK on the [Releases page](https://github.com/sshahs/kaliscriber/releases). Open it on your phone to install (Android 8.0+). Builds share a signing key, so newer ones install as updates.
+Every push to `main` publishes signed APKs on the [Releases page](https://github.com/sshahs/kaliscriber/releases): `arm64-v8a` for almost every current phone (about 25 MB), `armeabi-v7a` for older 32-bit phones, `x86_64` for emulators, and a `universal` APK. Open one on your phone to install (Android 8.0+). Builds share a signing key, so newer ones install as updates.
 
 For a signing key you control, add `KALISCRIBER_KEYSTORE_BASE64` (a base64-encoded keystore with alias `kaliscriber`) and `KALISCRIBER_KEYSTORE_PASSWORD` as repository secrets.
 
