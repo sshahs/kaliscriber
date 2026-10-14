@@ -310,7 +310,14 @@ private fun VoiceMemorySection(settings: AppSettings, states: Map<String, ModelS
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(voice.name, style = MaterialTheme.typography.bodyMedium)
-                    Text("Learned from ${voice.samples} meeting${if (voice.samples == 1) "" else "s"}", style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        if (voice.model != ModelCatalog.embedding.id) {
+                            "Saved with the older speaker model. Name them in a meeting to save their voice again."
+                        } else {
+                            "Learned from ${voice.samples} meeting${if (voice.samples == 1) "" else "s"}"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
                 IconButton(onClick = { vm.deleteVoice(voice.id) }) { Icon(Icons.Filled.Delete, contentDescription = "Forget ${voice.name}") }
             }

@@ -48,6 +48,10 @@ class ModelManager(context: Context, http: OkHttpClient, private val scope: Coro
     private val _states = MutableStateFlow(ModelCatalog.all.associate { it.id to stateOnDisk(it) })
     val states: StateFlow<Map<String, ModelState>> = _states.asStateFlow()
 
+    init {
+        scope.launch(Dispatchers.IO) { ModelCatalog.retired.forEach { runCatching { File(root, it).deleteRecursively() } } }
+    }
+
     fun dir(model: LocalModel): File = File(root, model.id)
 
     fun isReady(model: LocalModel): Boolean = File(dir(model), READY_MARKER).exists()

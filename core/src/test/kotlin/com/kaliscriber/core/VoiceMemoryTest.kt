@@ -114,4 +114,36 @@ class VoiceMemoryTest {
         assertTrue(llm.requests.last().system.contains("still in progress"))
         assertFalse(llm.requests.last().system.contains("Duration:"))
     }
+
+    @Test
+    fun `voices saved with an earlier speaker model are learned again`() = runTest {
+        // Saved with the old model (no tag), in a meeting whose recording is still on the phone.
+        library.enroll("Priya", floatArrayOf(0.3f, 0.3f, 0.3f, 0.3f, 0.3f))
+        val old = library.profiles.value.single()
+        val meeting = repo.create()
+        val audio = File(root, "old.m4a").apply { writeBytes(ByteArray(8)) }
+        repo.update(meeting.id) {
+            it.copy(
+                audioPath = audio.path,
+                speakers = listOf(com.kaliscriber.core.model.Speaker("p", "Priya", isPlaceholder = false, voiceProfileId = old.id)),
+                segments = listOf(com.kaliscriber.core.model.TranscriptSegment("s", 0, 5_000, "Priya here", speakerId = "p")),
+            )
+        }
+        val newLibrary = VoiceLibrary(JsonValueStore(File(root, "voices.json"), ListSerializer(VoiceProfile.serializer()), emptyList()), model = "titanet")
+        assertEquals(listOf("Priya"), newLibrary.outdated.map { it.name })
+        assertTrue(newLibrary.assign(mapOf("x" to priyaVoice)).isEmpty(), "an outdated voice is not compared with new voiceprints")
+
+        val embedder = FakeEmbedder(::voiceFor).apply { segmentsText = { "Priya" } }
+        val p = MeetingPipeline(repo, FakeAi(FakeLlm { "{}" }, FakeStt(false) { SttResult(emptyList(), false) }),
+            MeetingAi(FakeAi(FakeLlm { "{}" }, FakeStt(false) { SttResult(emptyList(), false) }), { settings }), { settings },
+            voices = newLibrary, embedder = { embedder })
+        assertEquals(1, p.relearnVoices())
+
+        val profile = newLibrary.profiles.value.single()
+        assertEquals(old.id, profile.id, "the saved voice keeps its identity")
+        assertEquals("titanet", profile.model)
+        assertTrue(newLibrary.outdated.isEmpty())
+        assertEquals("Priya", newLibrary.assign(mapOf("x" to priyaVoice))["x"]?.profile?.name)
+        assertEquals("titanet", repo.get(meeting.id)!!.speaker("p")!!.voiceModel)
+    }
 }

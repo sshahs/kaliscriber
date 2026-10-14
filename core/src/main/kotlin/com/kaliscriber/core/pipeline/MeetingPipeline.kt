@@ -189,9 +189,15 @@ class MeetingPipeline(
                 val print = key?.let(prints::get) ?: return@map sp
                 val match = matches[key]
                 if (match != null && sp.isPlaceholder && result.speakers.none { it.id != sp.id && it.name.equals(match.profile.name, true) }) {
-                    sp.copy(name = match.profile.name, isPlaceholder = false, voiceProfileId = match.profile.id, embedding = print.toList())
+                    sp.copy(
+                        name = match.profile.name,
+                        isPlaceholder = false,
+                        voiceProfileId = match.profile.id,
+                        embedding = print.toList(),
+                        voiceModel = voices?.model,
+                    )
                 } else {
-                    sp.copy(embedding = print.toList())
+                    sp.copy(embedding = print.toList(), voiceModel = voices?.model)
                 }
             }
             m.copy(speakers = speakers, segments = result.segments, speakersFinal = m.speakersFinal || final)
@@ -617,10 +623,11 @@ class MeetingPipeline(
                             isPlaceholder = false,
                             voiceProfileId = match.profile.id,
                             embedding = print.toList(),
+                            voiceModel = library.model,
                             suggestedName = null,
                             suggestionReason = null,
                         )
-                    else -> sp.copy(embedding = print.toList())
+                    else -> sp.copy(embedding = print.toList(), voiceModel = library.model)
                 }
             })
         }
@@ -660,13 +667,14 @@ class MeetingPipeline(
             val meeting = repo.get(meetingId) ?: return
             // A rename to an existing name merges speakers, so look the speaker up by name.
             val speaker = meeting.speakers.firstOrNull { it.name.equals(name.trim(), true) } ?: return
-            val print = speaker.embedding?.toFloatArray()
+            // A voiceprint from an earlier speaker model can't be compared with the saved ones.
+            val print = speaker.embedding?.takeIf { speaker.voiceModel == library.model }?.toFloatArray()
                 ?: computeVoiceprints(meetingId, onlySpeaker = speaker.id)?.get(speaker.id)
                 ?: return
             val profile = library.enroll(speaker.name, print)
             repo.update(meetingId) { m ->
                 m.copy(speakers = m.speakers.map {
-                    if (it.id == speaker.id) it.copy(voiceProfileId = profile.id, embedding = print.toList()) else it
+                    if (it.id == speaker.id) it.copy(voiceProfileId = profile.id, embedding = print.toList(), voiceModel = library.model) else it
                 })
             }
         } catch (e: CancellationException) {
@@ -675,6 +683,49 @@ class MeetingPipeline(
             // The rename itself succeeded; remembering the voice is best effort.
             repo.update(meetingId) { it.copy(lastError = "Could not save ${name.trim()}'s voice: ${describe(e)}") }
         }
+    }
+
+    /**
+     * Saved voices from an earlier speaker model can't be compared with new voiceprints. Learns them
+     * again from the most recent meetings where those people spoke, while the recordings are still
+     * on the phone. Returns how many voices were learned again.
+     */
+    suspend fun relearnVoices(): Int {
+        val library = voices ?: return 0
+        if (library.outdated.isEmpty() || embedder()?.voiceEmbeddingAvailable != true) return 0
+        val withAudio = repo.all()
+            .filter { m -> m.audioPath?.let { File(it).exists() } == true }
+            .sortedByDescending { it.createdAt }
+        var learned = 0
+        for (profile in library.outdated) {
+            val prints = mutableListOf<FloatArray>()
+            for (m in withAudio) {
+                if (prints.size >= RELEARN_MEETINGS) break
+                val speaker = m.speakers.firstOrNull {
+                    it.voiceProfileId == profile.id || (!it.isPlaceholder && it.name.equals(profile.name, ignoreCase = true))
+                } ?: continue
+                val print = try {
+                    computeVoiceprints(m.id, onlySpeaker = speaker.id)?.get(speaker.id)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    log("Couldn't learn ${profile.name}'s voice from ${m.title}: ${describe(e)}")
+                    null
+                } ?: continue
+                prints += print
+                repo.update(m.id) { mm ->
+                    mm.copy(speakers = mm.speakers.map {
+                        if (it.id == speaker.id) it.copy(embedding = print.toList(), voiceModel = library.model) else it
+                    })
+                }
+            }
+            if (prints.isNotEmpty()) {
+                library.relearn(profile.id, prints)
+                learned++
+            }
+            log("Voice memory: ${profile.name} ${if (prints.isEmpty()) "has no recordings left to learn from" else "learned again from ${prints.size} meeting(s)"}")
+        }
+        return learned
     }
 
     /** Sets how many people are in the meeting (null = detect automatically). */
@@ -856,6 +907,8 @@ class MeetingPipeline(
         const val LIVE_NOTES_MS = 10 * 60_000L
 
         const val MIN_VOICEPRINT_SEGMENT_MS = 1_000L
+        /** Meetings a saved voice is learned again from when the speaker model changes. */
+        const val RELEARN_MEETINGS = 3
         /** Timeline entries kept per meeting; reprocessing adds more. */
         const val MAX_TIMELINE = 80
         const val MAX_VOICEPRINT_MS = 45_000L

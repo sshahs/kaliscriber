@@ -71,6 +71,8 @@ data class Speaker(
     val suggestionReason: String? = null,
     /** Voiceprint (speaker embedding) computed on-device from this speaker's audio. */
     val embedding: List<Float>? = null,
+    /** The speaker model [embedding] came from; voiceprints from different models can't be compared. */
+    val voiceModel: String? = null,
     /** Saved voice this speaker was recognised as, or enrolled into. */
     val voiceProfileId: String? = null,
     /** Labels of speakers merged into this one, so later detection keeps them together. */

@@ -74,10 +74,14 @@ object ModelCatalog {
         ModelRole.SEGMENTATION, "$BASE/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2", 7,
     )
 
+    /** NeMo TitaNet small: as accurate as ERes2Net at telling voices apart, and about a third faster. */
     val embedding = LocalModel(
-        "eres2net-speaker", "3D-Speaker ERes2Net", "Recognises the same voice across the meeting.",
-        ModelRole.EMBEDDING, "$BASE/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx", 38,
+        "titanet-small-speaker", "NeMo TitaNet small", "Recognises the same voice across the meeting.",
+        ModelRole.EMBEDDING, "$BASE/speaker-recongition-models/nemo_en_titanet_small.onnx", 40,
     )
+
+    /** Models the app used before, deleted from the phone to free the space. */
+    val retired = listOf("eres2net-speaker")
 
     val diarization = listOf(segmentation, embedding)
 

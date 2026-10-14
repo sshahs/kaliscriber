@@ -11,7 +11,9 @@ import com.kaliscriber.app.export.MeetingExporter
 import com.kaliscriber.app.processing.MeetingJobs
 import com.kaliscriber.app.recording.RecordingManager
 import com.kaliscriber.app.speech.LocalSpeechEngine
+import com.kaliscriber.app.speech.ModelCatalog
 import com.kaliscriber.app.speech.ModelManager
+import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.app.speech.SpeechOutput
 import com.kaliscriber.app.tasks.TaskReminders
 import com.kaliscriber.core.ai.AppSettings
@@ -36,6 +38,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
@@ -93,6 +96,7 @@ class AppContainer(context: Context) {
     /** Remembered voices (on-device voiceprints) for recognising people across meetings. */
     val voices = VoiceLibrary(
         JsonValueStore(File(filesDir, "voices.json"), ListSerializer(VoiceProfile.serializer()), emptyList()),
+        model = ModelCatalog.embedding.id,
     )
     val pipeline = MeetingPipeline(
         meetings, ai, meetingAi, settings,
@@ -136,6 +140,13 @@ class AppContainer(context: Context) {
             meetings.load()
             notes.load()
             recoverInterruptedMeetings()
+            // Voices saved with the previous speaker model are learned again once the new one is here.
+            models.states.first { it[ModelCatalog.embedding.id] is ModelState.Ready }
+            if (voices.outdated.isNotEmpty()) {
+                runCatching { pipeline.relearnVoices() }
+                    .onSuccess { Log.i("KaliScriber", "Voice memory: learned $it voice(s) again with the new speaker model") }
+                    .onFailure { Log.w("KaliScriber", "Voice memory: couldn't learn voices again", it) }
+            }
         }
     }
 

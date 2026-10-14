@@ -15,6 +15,8 @@ data class VoiceProfile(
     val embedding: List<Float>,
     val samples: Int = 1,
     val updatedAt: Long = 0,
+    /** The speaker model [embedding] came from (null for the first one the app used). */
+    val model: String? = null,
 )
 
 data class VoiceMatch(val profile: VoiceProfile, val score: Float)
@@ -26,8 +28,16 @@ data class VoiceMatch(val profile: VoiceProfile, val score: Float)
 class VoiceLibrary(
     private val store: JsonValueStore<List<VoiceProfile>>,
     private val clock: Clock = Clock.System,
+    /**
+     * The speaker model new voiceprints come from. Saved voices from another model can't be
+     * compared with them, so they are left out of matching until they are learned again.
+     */
+    val model: String? = null,
 ) {
     val profiles: StateFlow<List<VoiceProfile>> = store.value
+
+    /** Saved voices from an earlier speaker model, which need learning again. */
+    val outdated: List<VoiceProfile> get() = profiles.value.filter { it.model != model }
 
     /**
      * Matches each speaker's voiceprint to at most one saved voice and each saved voice to at most
@@ -39,7 +49,7 @@ class VoiceLibrary(
         threshold: Float = DEFAULT_THRESHOLD,
         margin: Float = DEFAULT_MARGIN,
     ): Map<String, VoiceMatch> {
-        val saved = profiles.value
+        val saved = profiles.value.filter { it.model == model }
         if (saved.isEmpty() || voiceprints.isEmpty()) return emptyMap()
         val candidates = mutableListOf<Triple<String, VoiceProfile, Float>>()
         for ((speakerId, print) in voiceprints) {
@@ -68,8 +78,11 @@ class VoiceLibrary(
         var saved: VoiceProfile? = null
         store.update { list ->
             val existing = list.firstOrNull { it.name.equals(clean, ignoreCase = true) }
-            val updated = if (existing == null || existing.embedding.size != print.size) {
-                VoiceProfile(Ids.new(), clean, print.toList(), 1, clock.now())
+            val updated = if (existing == null) {
+                VoiceProfile(Ids.new(), clean, print.toList(), 1, clock.now(), model)
+            } else if (existing.model != model || existing.embedding.size != print.size) {
+                // A voice saved with another speaker model starts again from this voiceprint.
+                existing.copy(name = clean, embedding = print.toList(), samples = 1, updatedAt = clock.now(), model = model)
             } else {
                 // Running average, capped so the voiceprint keeps adapting to new recordings.
                 val weight = existing.samples.coerceAtMost(MAX_WEIGHT).toFloat()
@@ -85,6 +98,23 @@ class VoiceLibrary(
             list.filterNot { it.id == updated.id || (existing == null && it.name.equals(clean, ignoreCase = true)) } + updated
         }
         return saved!!
+    }
+
+    /** Replaces a saved voice's voiceprint with the average of [voiceprints] from the current model. */
+    suspend fun relearn(id: String, voiceprints: List<FloatArray>) {
+        if (voiceprints.isEmpty()) return
+        val size = voiceprints.first().size
+        val sum = FloatArray(size)
+        voiceprints.filter { it.size == size }.forEach { print -> normalize(print).forEachIndexed { i, v -> sum[i] += v } }
+        store.update { list ->
+            list.map {
+                if (it.id == id) {
+                    it.copy(embedding = normalize(sum).toList(), samples = voiceprints.size, updatedAt = clock.now(), model = model)
+                } else {
+                    it
+                }
+            }
+        }
     }
 
     suspend fun rename(id: String, name: String) = store.update { list ->
