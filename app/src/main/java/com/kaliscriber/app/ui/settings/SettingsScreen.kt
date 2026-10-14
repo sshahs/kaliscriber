@@ -69,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.ui.common.DropdownSelector
 import com.kaliscriber.app.ui.common.SectionCard
+import com.kaliscriber.core.ai.ApiKind
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.app.data.ExportSecret
@@ -541,6 +542,22 @@ private fun ProviderCard(
                         label = { Text("Transcription model") },
                         placeholder = { Text(id.defaultSttModel.ifBlank { "provider default" }) },
                         singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (id.supportsChat && (id.kind == ApiKind.OPENAI_COMPATIBLE || id.kind == ApiKind.COMMAND_CODE)) {
+                    DropdownSelector(
+                        label = "Thinking effort (reasoning models)",
+                        selected = draft.reasoningEffort,
+                        options = listOf("", "low", "medium", "high", "max"),
+                        optionLabel = { effort ->
+                            when (effort) {
+                                "" -> "Model default"
+                                "low" -> "Low · fastest, good for summaries"
+                                else -> effort.replaceFirstChar { it.uppercase() }
+                            }
+                        },
+                        onSelect = { draft = draft.copy(reasoningEffort = it) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

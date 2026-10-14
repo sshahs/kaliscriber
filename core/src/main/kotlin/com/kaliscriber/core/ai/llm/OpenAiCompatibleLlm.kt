@@ -29,6 +29,20 @@ class OpenAiCompatibleLlm(
 
     override suspend fun complete(request: LlmRequest): String {
         if (config.chatModel.isBlank()) throw AiException("No chat model set for ${config.id.displayName}")
+        val effort = config.reasoningEffort.takeIf { it.isNotBlank() }
+        return try {
+            send(request, effort)
+        } catch (e: AiException) {
+            // Not every model takes a thinking effort; retry once with the provider's default.
+            if (effort != null && e.statusCode in 400..422 && e.message.orEmpty().contains("reasoning", ignoreCase = true)) {
+                send(request, null)
+            } else {
+                throw e
+            }
+        }
+    }
+
+    private suspend fun send(request: LlmRequest, effort: String?): String {
         val body = buildJsonObject {
             put("model", config.chatModel)
             putJsonArray("messages") {
@@ -40,6 +54,7 @@ class OpenAiCompatibleLlm(
             if (request.jsonMode && config.id.supportsJsonMode) {
                 putJsonObject("response_format") { put("type", "json_object") }
             }
+            if (effort != null) put("reasoning_effort", effort)
         }
         val req = Request.Builder()
             .url("${config.baseUrl}/chat/completions")

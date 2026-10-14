@@ -132,6 +132,11 @@ data class ProviderSettings(
     val zeroDataRetention: Boolean = true,
     val ttsModel: String = "",
     val voiceId: String = "",
+    /**
+     * Thinking effort for reasoning models on Chat Completions APIs ("low", "medium", "high", "max");
+     * blank uses the provider's default. Lower is much faster for summaries of long meetings.
+     */
+    val reasoningEffort: String = "",
 )
 
 /** Who reads text aloud. */
@@ -184,6 +189,7 @@ data class AppSettings(
             zeroDataRetention = id.supportsZdr && s.zeroDataRetention,
             ttsModel = s.ttsModel.ifBlank { if (id.supportsTts) ProviderId.DEFAULT_ELEVENLABS_TTS_MODEL else "" },
             voiceId = s.voiceId.ifBlank { if (id.supportsTts) ProviderId.DEFAULT_ELEVENLABS_VOICE else "" },
+            reasoningEffort = s.reasoningEffort.trim().lowercase(),
         )
     }
 
@@ -223,6 +229,7 @@ data class ProviderConfig(
     val zeroDataRetention: Boolean = false,
     val ttsModel: String = "",
     val voiceId: String = "",
+    val reasoningEffort: String = "",
     /** Extra headers sent with every request, e.g. Command Code's ZDR flag. */
     val extraHeaders: Map<String, String> = emptyMap(),
 ) {

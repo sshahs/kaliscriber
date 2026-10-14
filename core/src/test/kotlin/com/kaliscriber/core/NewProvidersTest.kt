@@ -68,6 +68,20 @@ class NewProvidersTest {
     }
 
     @Test
+    fun `thinking effort is sent and dropped when a model rejects it`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":{"message":"reasoning_effort is not supported for this model"}}"""))
+        server.enqueue(MockResponse().setBody("""{"choices":[{"message":{"content":"ok"}}]}"""))
+        val config = settings(ProviderId.COMMAND_CODE, "/provider/v1") {
+            it.copy(chatModel = "deepseek/deepseek-v4.1-flash", reasoningEffort = "Low")
+        }.configFor(ProviderId.COMMAND_CODE, "user_abc")
+        assertEquals("ok", LlmClients.create(config, http).complete(request))
+        val first = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("low", first["reasoning_effort"]!!.jsonPrimitive.content)
+        val retry = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertTrue("reasoning_effort" !in retry)
+    }
+
+    @Test
     fun `command code routes claude models to the messages wire`() = runTest {
         server.enqueue(MockResponse().setBody("""{"content":[{"type":"text","text":"hello"}]}"""))
         val config = settings(ProviderId.COMMAND_CODE, "/provider/v1") { it.copy(chatModel = "claude-sonnet-5-5") }

@@ -41,6 +41,7 @@ data class ProviderDraft(
     val zeroDataRetention: Boolean = true,
     val voiceId: String = "",
     val ttsModel: String = "",
+    val reasoningEffort: String = "",
 )
 
 sealed interface ProviderStatus {
@@ -141,6 +142,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             zeroDataRetention = s.zeroDataRetention,
             voiceId = s.voiceId,
             ttsModel = s.ttsModel,
+            reasoningEffort = s.reasoningEffort,
         )
     }
 
@@ -165,6 +167,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         zeroDataRetention = zeroDataRetention,
         ttsModel = ttsModel.trim(),
         voiceId = voiceId.trim(),
+        reasoningEffort = reasoningEffort,
     )
 
     private fun configFor(id: ProviderId, draft: ProviderDraft) = AppSettings()

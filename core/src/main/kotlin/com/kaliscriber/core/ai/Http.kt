@@ -37,7 +37,7 @@ internal val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
 fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(30, TimeUnit.SECONDS)
-    .readTimeout(5, TimeUnit.MINUTES)
+    .readTimeout(10, TimeUnit.MINUTES)
     .writeTimeout(5, TimeUnit.MINUTES)
     .callTimeout(15, TimeUnit.MINUTES)
     .build()
