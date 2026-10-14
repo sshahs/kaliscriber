@@ -36,3 +36,4 @@ google-services.json
 
 # Downloaded at build time (see app/build.gradle.kts)
 app/libs/
+dist/
