@@ -83,6 +83,11 @@ internal fun httpError(provider: ProviderId, code: Int, body: String): AiExcepti
         401, 403 -> "Check the API key for ${provider.displayName} in Settings."
         404 -> "Check the base URL and model name for ${provider.displayName}."
         413 -> "The audio file is too large for ${provider.displayName}."
+        422 -> if (provider.supportsZdr) {
+            "This model has no zero-data-retention route at ${provider.displayName}. Pick another model or turn off ZDR in Settings."
+        } else {
+            null
+        }
         429 -> "Rate limited or out of credit at ${provider.displayName}."
         else -> null
     }
@@ -108,3 +113,19 @@ private fun extractErrorMessage(body: String): String {
 
 internal fun Request.Builder.bearer(key: String): Request.Builder =
     if (key.isBlank()) this else header("Authorization", "Bearer $key")
+
+internal fun Request.Builder.headers(extra: Map<String, String>): Request.Builder =
+    apply { extra.forEach { (name, value) -> header(name, value) } }
+
+/** Executes the request and returns the raw body bytes (e.g. synthesized audio). */
+internal suspend fun OkHttpClient.executeForBytes(request: Request, provider: ProviderId): ByteArray {
+    val response = try {
+        newCall(request).await()
+    } catch (e: IOException) {
+        throw AiException("Could not reach ${provider.displayName}: ${e.message ?: e.javaClass.simpleName}", cause = e)
+    }
+    response.use {
+        if (!it.isSuccessful) throw httpError(provider, it.code, it.body?.string().orEmpty())
+        return it.body?.bytes() ?: ByteArray(0)
+    }
+}

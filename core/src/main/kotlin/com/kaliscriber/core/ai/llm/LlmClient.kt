@@ -27,7 +27,8 @@ object LlmClients {
         ApiKind.OPENAI_COMPATIBLE -> OpenAiCompatibleLlm(config, http)
         ApiKind.ANTHROPIC -> AnthropicLlm(config, http)
         ApiKind.OLLAMA -> OllamaLlm(config, http)
-        ApiKind.DEEPGRAM, ApiKind.ASSEMBLYAI ->
+        ApiKind.COMMAND_CODE -> CommandCodeLlm(config, http)
+        ApiKind.LOCAL, ApiKind.DEEPGRAM, ApiKind.ASSEMBLYAI, ApiKind.ELEVENLABS ->
             throw IllegalArgumentException("${config.id.displayName} does not provide chat models")
     }
 }

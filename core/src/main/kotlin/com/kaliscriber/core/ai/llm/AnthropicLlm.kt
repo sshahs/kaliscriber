@@ -3,6 +3,7 @@ package com.kaliscriber.core.ai.llm
 import com.kaliscriber.core.ai.AiException
 import com.kaliscriber.core.ai.ProviderConfig
 import com.kaliscriber.core.ai.executeForJson
+import com.kaliscriber.core.ai.headers
 import com.kaliscriber.core.ai.toBody
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -55,4 +56,5 @@ class AnthropicLlm(
         .url(config.baseUrl + path)
         .header("x-api-key", config.apiKey)
         .header("anthropic-version", "2023-06-01")
+        .headers(config.extraHeaders)
 }

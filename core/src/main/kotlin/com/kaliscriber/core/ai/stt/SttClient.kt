@@ -40,15 +40,29 @@ object SttClients {
         ApiKind.OPENAI_COMPATIBLE -> OpenAiCompatibleStt(config, http)
         ApiKind.DEEPGRAM -> DeepgramStt(config, http)
         ApiKind.ASSEMBLYAI -> AssemblyAiStt(config, http)
-        ApiKind.ANTHROPIC, ApiKind.OLLAMA ->
+        ApiKind.ELEVENLABS -> ElevenLabsStt(config, http)
+        ApiKind.LOCAL -> throw IllegalArgumentException("On-device speech-to-text is provided by the app")
+        ApiKind.ANTHROPIC, ApiKind.OLLAMA, ApiKind.COMMAND_CODE ->
             throw IllegalArgumentException("${config.id.displayName} does not provide speech-to-text")
     }
 
     fun supportsDiarization(id: ProviderId, model: String): Boolean = when (id.kind) {
-        ApiKind.DEEPGRAM, ApiKind.ASSEMBLYAI -> true
+        ApiKind.DEEPGRAM, ApiKind.ASSEMBLYAI, ApiKind.ELEVENLABS -> true
         ApiKind.OPENAI_COMPATIBLE -> model.contains("diariz", ignoreCase = true)
         else -> false
     }
+}
+
+/** A stretch of audio attributed to one speaker, from a diarization pass. */
+data class SpeakerTurn(val startMs: Long, val endMs: Long, val speaker: String)
+
+/**
+ * Implemented by speech engines (the on-device one) that can tell speakers apart separately from
+ * transcription. The pipeline then labels the existing transcript instead of re-transcribing.
+ */
+interface SpeakerDiarizer {
+    val diarizationAvailable: Boolean
+    suspend fun diarize(audio: File): List<SpeakerTurn>
 }
 
 internal fun audioMediaType(file: File): MediaType = when (file.extension.lowercase()) {

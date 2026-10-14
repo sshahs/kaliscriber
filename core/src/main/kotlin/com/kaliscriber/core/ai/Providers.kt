@@ -3,7 +3,7 @@ package com.kaliscriber.core.ai
 import kotlinx.serialization.Serializable
 
 /** Wire protocol a provider speaks. */
-enum class ApiKind { OPENAI_COMPATIBLE, ANTHROPIC, OLLAMA, DEEPGRAM, ASSEMBLYAI }
+enum class ApiKind { LOCAL, OPENAI_COMPATIBLE, ANTHROPIC, OLLAMA, COMMAND_CODE, DEEPGRAM, ASSEMBLYAI, ELEVENLABS }
 
 /**
  * Every AI service the app can talk to with the user's own key (BYOK).
@@ -23,7 +23,16 @@ enum class ProviderId(
     /** Whether the OpenAI-style `response_format: json_object` is understood. */
     val supportsJsonMode: Boolean = false,
     val maxUploadBytes: Long = 25L * 1024 * 1024,
+    val supportsTts: Boolean = false,
+    /** Offers a zero-data-retention mode that can be switched on per request. */
+    val supportsZdr: Boolean = false,
 ) {
+    /** Speech-to-text on the phone with sherpa-onnx; audio never leaves the device. */
+    LOCAL(
+        "On-device (private, offline)", ApiKind.LOCAL, "",
+        supportsChat = false, supportsStt = true,
+        keyRequired = false, maxUploadBytes = Long.MAX_VALUE,
+    ),
     OPENAI(
         "OpenAI", ApiKind.OPENAI_COMPATIBLE, "https://api.openai.com/v1",
         supportsChat = true, supportsStt = true,
@@ -47,6 +56,12 @@ enum class ProviderId(
         supportsChat = true, supportsStt = false,
         defaultChatModel = "gpt-oss:120b",
         keyUrl = "https://ollama.com/settings/keys",
+    ),
+    COMMAND_CODE(
+        "Command Code", ApiKind.COMMAND_CODE, "https://api.commandcode.ai/provider/v1",
+        supportsChat = true, supportsStt = false,
+        defaultChatModel = "deepseek/deepseek-v4-flash",
+        keyUrl = "https://commandcode.ai/settings", supportsZdr = true,
     ),
     GROQ(
         "Groq", ApiKind.OPENAI_COMPATIBLE, "https://api.groq.com/openai/v1",
@@ -84,6 +99,13 @@ enum class ProviderId(
         defaultSttModel = "",
         keyUrl = "https://www.assemblyai.com/app/api-keys", maxUploadBytes = 2L * 1024 * 1024 * 1024,
     ),
+    ELEVENLABS(
+        "ElevenLabs", ApiKind.ELEVENLABS, "https://api.elevenlabs.io",
+        supportsChat = false, supportsStt = true,
+        defaultSttModel = "scribe_v2",
+        keyUrl = "https://elevenlabs.io/app/settings/api-keys", maxUploadBytes = 1024L * 1024 * 1024,
+        supportsTts = true,
+    ),
     CUSTOM_OPENAI(
         "Custom (OpenAI-compatible)", ApiKind.OPENAI_COMPATIBLE, "https://example.com/v1",
         supportsChat = true, supportsStt = true,
@@ -93,6 +115,10 @@ enum class ProviderId(
     companion object {
         val chatProviders: List<ProviderId> get() = entries.filter { it.supportsChat }
         val sttProviders: List<ProviderId> get() = entries.filter { it.supportsStt }
+        val ttsProviders: List<ProviderId> get() = entries.filter { it.supportsTts }
+
+        const val DEFAULT_ELEVENLABS_VOICE = "JBFqnCBsd6RMkjVDRZzb"
+        const val DEFAULT_ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
     }
 }
 
@@ -102,12 +128,28 @@ data class ProviderSettings(
     val baseUrl: String = "",
     val chatModel: String = "",
     val sttModel: String = "",
+    /** Zero data retention, for providers that offer it (Command Code). On by default. */
+    val zeroDataRetention: Boolean = true,
+    val ttsModel: String = "",
+    val voiceId: String = "",
 )
+
+/** Who reads text aloud. */
+@Serializable
+enum class TtsEngine(val displayName: String) {
+    DEVICE("This phone's voice (offline)"),
+    ELEVENLABS("ElevenLabs"),
+}
 
 @Serializable
 data class AppSettings(
     val chatProvider: ProviderId = ProviderId.OPENAI,
-    val sttProvider: ProviderId = ProviderId.OPENAI,
+    val sttProvider: ProviderId = ProviderId.LOCAL,
+    val ttsEngine: TtsEngine = TtsEngine.DEVICE,
+    /** Id of the on-device speech recognition model (see the app's model catalog). */
+    val localAsrModel: String = "",
+    /** Detect speakers on-device when a meeting ends (needs the speaker models). */
+    val localDiarization: Boolean = true,
     val providers: Map<ProviderId, ProviderSettings> = emptyMap(),
     /** Length of each live transcription chunk while recording. */
     val chunkSeconds: Int = 30,
@@ -136,6 +178,9 @@ data class AppSettings(
             baseUrl = s.baseUrl.ifBlank { id.defaultBaseUrl }.trimEnd('/'),
             chatModel = s.chatModel.ifBlank { id.defaultChatModel },
             sttModel = s.sttModel.ifBlank { id.defaultSttModel },
+            zeroDataRetention = id.supportsZdr && s.zeroDataRetention,
+            ttsModel = s.ttsModel.ifBlank { if (id.supportsTts) ProviderId.DEFAULT_ELEVENLABS_TTS_MODEL else "" },
+            voiceId = s.voiceId.ifBlank { if (id.supportsTts) ProviderId.DEFAULT_ELEVENLABS_VOICE else "" },
         )
     }
 
@@ -150,9 +195,15 @@ data class ProviderConfig(
     val baseUrl: String,
     val chatModel: String,
     val sttModel: String,
+    val zeroDataRetention: Boolean = false,
+    val ttsModel: String = "",
+    val voiceId: String = "",
+    /** Extra headers sent with every request, e.g. Command Code's ZDR flag. */
+    val extraHeaders: Map<String, String> = emptyMap(),
 ) {
     override fun toString(): String =
-        "ProviderConfig(id=$id, baseUrl=$baseUrl, chatModel=$chatModel, sttModel=$sttModel, apiKey=${if (apiKey.isBlank()) "<none>" else "<redacted>"})"
+        "ProviderConfig(id=$id, baseUrl=$baseUrl, chatModel=$chatModel, sttModel=$sttModel, zdr=$zeroDataRetention, " +
+            "apiKey=${if (apiKey.isBlank()) "<none>" else "<redacted>"})"
 }
 
 /** Supplies API keys, which the Android app keeps encrypted with the Android Keystore. */

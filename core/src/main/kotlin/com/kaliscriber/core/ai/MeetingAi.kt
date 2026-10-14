@@ -133,13 +133,30 @@ class MeetingAi(
         )
     }
 
-    suspend fun answer(meeting: Meeting, history: List<ChatMessage>, question: String, excerpt: ExcerptRef?): String {
+    suspend fun answer(
+        meeting: Meeting,
+        history: List<ChatMessage>,
+        question: String,
+        excerpt: ExcerptRef?,
+        spoken: Boolean = false,
+    ): String {
         requireTranscript(meeting)
         val messages = history.filterNot { it.isError }.takeLast(20).map {
             LlmMessage(if (it.role == ChatRole.USER) LlmRole.USER else LlmRole.ASSISTANT, it.content)
         } + LlmMessage(LlmRole.USER, if (excerpt != null) Prompts.excerptQuestion(meeting, excerpt, question) else question)
+        var system = Prompts.askSystem(meeting, transcriptFor(meeting), settings().outputLanguage)
+        if (spoken) system += "\n\n" + Prompts.SPOKEN_ANSWER_RULE
+        return ai.chat().complete(LlmRequest(system = system, messages = messages)).trim()
+    }
+
+    /** A natural, speakable recap of the meeting for an audio briefing. */
+    suspend fun briefingScript(meeting: Meeting): String {
+        requireTranscript(meeting)
         return ai.chat().complete(
-            LlmRequest(system = Prompts.askSystem(meeting, transcriptFor(meeting), settings().outputLanguage), messages = messages),
+            LlmRequest(
+                system = Prompts.briefingSystem(settings().outputLanguage),
+                messages = listOf(LlmMessage(LlmRole.USER, Prompts.meetingContext(meeting, transcriptFor(meeting)) + "\nWrite the briefing now.")),
+            ),
         ).trim()
     }
 

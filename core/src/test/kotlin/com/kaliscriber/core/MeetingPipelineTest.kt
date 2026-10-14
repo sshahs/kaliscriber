@@ -5,6 +5,7 @@ import com.kaliscriber.core.ai.MeetingAi
 import com.kaliscriber.core.ai.Prompts
 import com.kaliscriber.core.ai.llm.LlmRequest
 import com.kaliscriber.core.ai.stt.RawSegment
+import com.kaliscriber.core.ai.stt.SpeakerTurn
 import com.kaliscriber.core.ai.stt.SttResult
 import com.kaliscriber.core.model.AudioChunk
 import com.kaliscriber.core.model.ChatRole
@@ -231,6 +232,49 @@ class MeetingPipelineTest {
         val created = repo.assignToNewSpeaker(meeting.id, setOf(merged.segments[1].id), name = null)!!
         assertTrue(created.isPlaceholder)
         assertEquals(2, repo.get(meeting.id)!!.speakers.size)
+    }
+
+    @Test
+    fun `on-device diarization labels the live transcript without re-transcribing`() = runTest {
+        val turns = listOf(SpeakerTurn(0, 2_100, "0"), SpeakerTurn(2_100, 4_000, "1"), SpeakerTurn(4_000, 6_000, "0"))
+        val stt = FakeLocalStt(turns) {
+            SttResult(
+                listOf(RawSegment(0, 2_000, "Hi, I'm Priya."), RawSegment(2_200, 3_900, "Hello Priya!"), RawSegment(4_100, 6_000, "We ship.")),
+                diarized = false,
+            )
+        }
+        settings = settings.copy(autoAnalyze = false, suggestSpeakerNames = false)
+        val ai = FakeAi(llm(), stt)
+        val p = pipeline(ai)
+        val meeting = repo.create()
+        p.transcribeChunk(meeting.id, AudioChunk(0, chunkFile("c0.wav").path, 0, 6_000))
+
+        p.finishRecording(meeting.id, chunkFile("recording.m4a"), 6_000)
+
+        val m = repo.get(meeting.id)!!
+        assertEquals(1, stt.diarizeCalls)
+        assertEquals(1, stt.files.size, "the full recording is not transcribed again")
+        assertTrue(m.speakersFinal)
+        assertEquals(2, m.speakers.size)
+        assertEquals(m.segments[0].speakerId, m.segments[2].speakerId)
+        assertTrue(m.segments[0].speakerId != m.segments[1].speakerId)
+        assertTrue((ai.llm as FakeLlm).requests.none { it.system == Prompts.SEPARATE_SPEAKERS_SYSTEM })
+    }
+
+    @Test
+    fun `briefing script is stored and spoken answers ask for speech style`() = runTest {
+        val stt = FakeStt(false) { SttResult(listOf(RawSegment(0, 5_000, "We ship on the third.")), false) }
+        val fakeLlm = llm()
+        val p = pipeline(FakeAi(fakeLlm, stt))
+        val meeting = repo.create()
+        p.transcribeChunk(meeting.id, AudioChunk(0, chunkFile("c0.wav").path, 0, 5_000))
+
+        p.generateBriefingScript(meeting.id)
+        assertEquals("The launch is on 3 Nov [00:05].", repo.get(meeting.id)!!.briefing!!.script)
+        assertTrue(fakeLlm.requests.last().system.contains("audio briefings"))
+
+        p.ask(meeting.id, "When?", spoken = true)
+        assertTrue(fakeLlm.requests.last().system.contains(Prompts.SPOKEN_ANSWER_RULE))
     }
 
     @Test

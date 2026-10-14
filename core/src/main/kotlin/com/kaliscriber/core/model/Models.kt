@@ -26,6 +26,7 @@ data class Meeting(
     /** True once speakers come from a diarization pass over the whole meeting. */
     val speakersFinal: Boolean = false,
     val lastError: String? = null,
+    val briefing: Briefing? = null,
     val updatedAt: Long = createdAt,
 ) {
     fun speaker(id: String?): Speaker? = speakers.firstOrNull { it.id == id }
@@ -56,6 +57,14 @@ data class TranscriptSegment(
     val text: String,
     val speakerId: String? = null,
     val confidence: Float? = null,
+)
+
+/** A short spoken recap of the meeting, and the audio file it was rendered to. */
+@Serializable
+data class Briefing(
+    val script: String,
+    val audioPath: String? = null,
+    val createdAt: Long = 0,
 )
 
 @Serializable

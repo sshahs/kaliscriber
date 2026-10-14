@@ -4,8 +4,10 @@ import com.kaliscriber.core.ai.AiException
 import com.kaliscriber.core.ai.AiServices
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.MeetingAi
+import com.kaliscriber.core.ai.stt.SpeakerDiarizer
 import com.kaliscriber.core.ai.stt.SttResult
 import com.kaliscriber.core.model.AudioChunk
+import com.kaliscriber.core.model.Briefing
 import com.kaliscriber.core.model.ChatMessage
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.ExcerptRef
@@ -122,6 +124,7 @@ class MeetingPipeline(
             }
             val result = transcribeFile(audioFile, durationMs)
             replaceTranscript(meetingId, result, durationMs)
+            if (!result.diarized) applyLocalDiarization(meetingId, audioFile)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -137,6 +140,8 @@ class MeetingPipeline(
         } catch (e: Exception) {
             return false
         }
+        // On-device engines label the live transcript instead of transcribing everything again.
+        if (stt is SpeakerDiarizer) return applyLocalDiarization(meetingId, audioFile)
         val size = audioFile.length()
         if (!stt.supportsDiarization || size <= 0 || size > stt.maxUploadBytes) return false
         return try {
@@ -149,6 +154,26 @@ class MeetingPipeline(
         } catch (e: Exception) {
             // Keep the live transcript; just note why the better pass did not happen.
             repo.update(meetingId) { it.copy(lastError = "Full-meeting speaker detection failed: ${e.message}") }
+            false
+        }
+    }
+
+    /** Runs the on-device diarizer over [audioFile] and relabels the transcript. True if it ran. */
+    private suspend fun applyLocalDiarization(meetingId: String, audioFile: File): Boolean {
+        val diarizer = runCatching { ai.stt() }.getOrNull() as? SpeakerDiarizer ?: return false
+        if (!settings().localDiarization || !diarizer.diarizationAvailable) return false
+        return try {
+            val turns = diarizer.diarize(audioFile)
+            if (turns.isEmpty()) return false
+            repo.update(meetingId) { m ->
+                val result = SpeakerAssigner.applyTurns(m.segments, turns, random)
+                m.copy(speakers = result.speakers, segments = result.segments, speakersFinal = true)
+            }
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            repo.update(meetingId) { it.copy(lastError = "On-device speaker detection failed: ${e.message}") }
             false
         }
     }
@@ -258,12 +283,28 @@ class MeetingPipeline(
     }
 
     /** Asks the AI about the meeting (optionally about a selected excerpt) and records the exchange. */
-    suspend fun ask(meetingId: String, question: String, excerpt: ExcerptRef? = null): Result<String> {
+    /** Writes a spoken recap script for the meeting and stores it (audio is rendered by the app). */
+    suspend fun generateBriefingScript(meetingId: String): String {
+        val meeting = repo.get(meetingId) ?: throw AiException("Meeting not found")
+        val script = meetingAi.briefingScript(meeting)
+        repo.update(meetingId) { it.copy(briefing = Briefing(script = script, createdAt = clock.now())) }
+        return script
+    }
+
+    suspend fun setBriefingAudio(meetingId: String, path: String?) {
+        repo.update(meetingId) { m -> m.copy(briefing = m.briefing?.copy(audioPath = path)) }
+    }
+
+    /**
+     * Asks the AI about the meeting (optionally about a selected excerpt) and records the exchange.
+     * [spoken] asks for a short answer without Markdown, for voice conversations.
+     */
+    suspend fun ask(meetingId: String, question: String, excerpt: ExcerptRef? = null, spoken: Boolean = false): Result<String> {
         val before = repo.get(meetingId) ?: return Result.failure(IllegalArgumentException("Meeting not found"))
         val userMessage = ChatMessage(Ids.new(), ChatRole.USER, question.trim(), clock.now(), excerpt)
         repo.update(meetingId) { it.copy(chat = it.chat + userMessage) }
         return try {
-            val answer = meetingAi.answer(before, before.chat, question.trim(), excerpt)
+            val answer = meetingAi.answer(before, before.chat, question.trim(), excerpt, spoken)
             repo.update(meetingId) { it.copy(chat = it.chat + ChatMessage(Ids.new(), ChatRole.ASSISTANT, answer, clock.now())) }
             Result.success(answer)
         } catch (e: CancellationException) {

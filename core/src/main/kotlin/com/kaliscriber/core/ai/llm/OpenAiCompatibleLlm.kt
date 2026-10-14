@@ -5,6 +5,7 @@ import com.kaliscriber.core.ai.ProviderConfig
 import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.ai.bearer
 import com.kaliscriber.core.ai.executeForJson
+import com.kaliscriber.core.ai.headers
 import com.kaliscriber.core.ai.toBody
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -43,6 +44,7 @@ class OpenAiCompatibleLlm(
         val req = Request.Builder()
             .url("${config.baseUrl}/chat/completions")
             .bearer(config.apiKey)
+            .headers(config.extraHeaders)
             .apply {
                 if (config.id == ProviderId.OPENROUTER) {
                     header("HTTP-Referer", "https://github.com/sshahs/kaliscriber")
@@ -67,7 +69,7 @@ class OpenAiCompatibleLlm(
     }
 
     override suspend fun listModels(): List<String> {
-        val request = Request.Builder().url("${config.baseUrl}/models").bearer(config.apiKey).get().build()
+        val request = Request.Builder().url("${config.baseUrl}/models").bearer(config.apiKey).headers(config.extraHeaders).get().build()
         val json = http.executeForJson(request, config.id)
         val data = (json["data"] ?: json["models"])?.jsonArray ?: return emptyList()
         return data.mapNotNull { item ->

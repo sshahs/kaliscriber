@@ -122,6 +122,19 @@ Label speakers S1, S2, S3... in order of first appearance, reusing the labels al
 Return ONLY a JSON object listing every segment in order, splitting a segment into several turns when the speaker changes inside it. Copy the text exactly; do not correct, translate or summarise it:
 {"turns": [{"i": 0, "s": "S1", "text": "exact text"}]}"""
 
+    const val SPOKEN_ANSWER_RULE = """The user is talking to you by voice and will hear your answer read aloud. Reply in two to four short, natural spoken sentences. No Markdown, lists, headings or symbols. Say times like "about twelve minutes in" rather than citing [12:34]."""
+
+    fun briefingSystem(outputLanguage: String) = """
+        You write audio briefings: a spoken catch-up on a meeting for someone who missed it, read aloud by a text-to-speech voice.
+        - 150 to 300 words, about one to two minutes when spoken.
+        - Plain flowing sentences only: no Markdown, bullet points, headings, emoji or timestamps.
+        - Open with what the meeting was about in one sentence, then the key decisions, who owns which next steps (with deadlines), and anything unresolved.
+        - Use people's names when known. Unidentified speakers have placeholder names; call them "one participant" instead.
+        - Never invent facts.
+        - ${languageRule(outputLanguage)}
+        Reply with the script only.
+    """.trimIndent()
+
     fun noteSystem(outputLanguage: String) = """
         You are KaliScriber, an AI note-taking assistant. You work on the user's notes, which may be typed or dictated (and so contain transcription errors).
         Keep every fact, number, name and commitment. Never invent information. Output Markdown.
