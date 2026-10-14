@@ -1,5 +1,6 @@
 package com.kaliscriber.core.store
 
+import com.kaliscriber.core.model.ActionItem
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
@@ -119,6 +120,12 @@ class MeetingRepository(
 
     suspend fun deleteSegment(meetingId: String, segmentId: String) = update(meetingId) { m ->
         m.copy(segments = m.segments.filter { it.id != segmentId }).withoutUnusedPlaceholders()
+    }
+
+    /** Changes one action item; marks it as edited so a regenerated summary keeps the change. */
+    suspend fun editActionItem(meetingId: String, itemId: String, transform: (ActionItem) -> ActionItem) = update(meetingId) { m ->
+        val insights = m.insights ?: return@update m
+        m.copy(insights = insights.copy(actionItems = insights.actionItems.map { if (it.id == itemId) transform(it).copy(edited = true) else it }))
     }
 
     suspend fun setActionItemDone(meetingId: String, itemId: String, done: Boolean) = update(meetingId) { m ->

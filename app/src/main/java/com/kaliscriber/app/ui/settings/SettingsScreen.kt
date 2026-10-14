@@ -2,8 +2,13 @@
 
 package com.kaliscriber.app.ui.settings
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +34,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Card
@@ -38,13 +44,13 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -65,18 +71,18 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaliscriber.app.appViewModel
+import com.kaliscriber.app.data.ExportSecret
+import com.kaliscriber.app.export.ExportTarget
+import com.kaliscriber.app.speech.ModelCatalog
+import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.app.ui.common.DropdownSelector
 import com.kaliscriber.app.ui.common.SectionCard
 import com.kaliscriber.core.ai.ApiKind
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.ProviderId
-import com.kaliscriber.app.data.ExportSecret
-import com.kaliscriber.app.export.ExportTarget
-import com.kaliscriber.app.speech.ModelCatalog
-import androidx.compose.material.icons.filled.RecordVoiceOver
-import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.core.ai.TtsEngine
 import com.kaliscriber.core.ai.stt.SttClients
 import kotlin.math.roundToInt
@@ -108,6 +114,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             item { ActiveServices(settings, keys, vm) }
             item { LocalSpeechSection(settings, modelStates, vm) }
             item { VoiceMemorySection(settings, modelStates, vm) }
+            item { ReminderSection(settings, vm) }
             item {
                 Column {
                     Text("Providers & API keys", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
@@ -306,6 +313,36 @@ private fun VoiceMemorySection(settings: AppSettings, states: Map<String, ModelS
                 }
                 IconButton(onClick = { vm.deleteVoice(voice.id) }) { Icon(Icons.Filled.Delete, contentDescription = "Forget ${voice.name}") }
             }
+        }
+    }
+}
+
+@Composable
+private fun ReminderSection(settings: AppSettings, vm: SettingsViewModel) {
+    val context = LocalContext.current
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        vm.update { it.copy(taskReminders = granted) }
+    }
+    SectionCard("Action item reminders") {
+        Text(
+            "A daily notification listing action items that are overdue or due that day. Find all of them under Tasks on the home screen.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ToggleRow("Daily reminder", "Only shown when something is due", settings.taskReminders) { on ->
+            val needsPermission = on && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            if (needsPermission) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.update { it.copy(taskReminders = on) }
+        }
+        if (settings.taskReminders) {
+            DropdownSelector(
+                label = "Remind me at",
+                selected = settings.reminderHour,
+                options = (5..21).toList(),
+                optionLabel = { hour -> String.format(java.util.Locale.ROOT, "%02d:00", hour) },
+                onSelect = { hour -> vm.update { it.copy(reminderHour = hour) } },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

@@ -299,7 +299,7 @@ private fun shareAudio(context: Context, file: File, title: String) {
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, onAskAboutSelection: () -> Unit) {
+fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String? = null, onAskAboutSelection: () -> Unit) {
     val selection by vm.selection.collectAsStateWithLifecycle()
     val position by vm.player.position.collectAsStateWithLifecycle()
     val playing by vm.player.playing.collectAsStateWithLifecycle()
@@ -322,6 +322,15 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, onAskAboutSelection: (
     LaunchedEffect(activeId) {
         val index = meeting.segments.indexOfFirst { it.id == activeId }
         if (index >= 0) listState.animateScrollToItem(index)
+    }
+    // Jump once to the line a search result or answer pointed at.
+    var focused by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(focusSegmentId) {
+        val index = meeting.segments.indexOfFirst { it.id == focusSegmentId }
+        if (index >= 0 && !focused) {
+            focused = true
+            listState.scrollToItem((index - 1).coerceAtLeast(0))
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -384,6 +393,7 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, onAskAboutSelection: (
                 val background = when {
                     selected -> MaterialTheme.colorScheme.primaryContainer
                     seg.id == activeId -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+                    seg.id == focusSegmentId -> MaterialTheme.colorScheme.secondaryContainer
                     else -> MaterialTheme.colorScheme.surface
                 }
                 Column(

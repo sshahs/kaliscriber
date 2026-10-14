@@ -29,8 +29,10 @@ import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -67,9 +69,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.app.ui.common.EmptyState
+import com.kaliscriber.app.ui.tasks.TasksTab
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
+import com.kaliscriber.core.search.MeetingSearch
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -81,14 +85,20 @@ fun HomeScreen(
     onOpenNote: (String) -> Unit,
     onOpenRecording: () -> Unit,
     onOpenSettings: () -> Unit,
+    /** Opens a meeting's transcript at a line (from a search result). */
+    onOpenMeetingAt: (meetingId: String, segmentId: String?) -> Unit = { id, _ -> onOpenMeeting(id) },
+    /** Opens "Ask all meetings", optionally asking [question] straight away. */
+    onAskAll: (question: String?) -> Unit = {},
+    startTab: Int = 0,
 ) {
     val vm = appViewModel { HomeViewModel(it) }
     val meetings by vm.meetings.collectAsStateWithLifecycle()
     val notes by vm.notes.collectAsStateWithLifecycle()
+    val searchResults by vm.searchResults.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val recording by vm.recording.collectAsStateWithLifecycle()
     val needsSetup by vm.needsSetup.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(startTab.coerceIn(0, 2)) }
     var confirmDelete by remember { mutableStateOf<(() -> Unit)?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -130,6 +140,9 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("KaliScriber") },
                 actions = {
+                    IconButton(onClick = { onAskAll(null) }) {
+                        Icon(Icons.Filled.QuestionAnswer, contentDescription = "Ask all meetings")
+                    }
                     IconButton(onClick = { importer.launch(arrayOf("audio/*", "video/mp4")) }) {
                         Icon(Icons.Filled.AudioFile, contentDescription = "Import audio")
                     }
@@ -139,7 +152,9 @@ fun HomeScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
-            if (tab == 0) {
+            if (tab == 2) {
+                // The task list has no create action; items come from meeting summaries.
+            } else if (tab == 0) {
                 ExtendedFloatingActionButton(
                     onClick = ::requestRecording,
                     icon = { Icon(if (recording is RecordingState.Idle) Icons.Filled.Mic else Icons.Filled.FiberManualRecord, null) },
@@ -158,68 +173,88 @@ fun HomeScreen(
             TabRow(selectedTabIndex = tab) {
                 Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Meetings") }, icon = { Icon(Icons.Filled.Groups, null) })
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Notes") }, icon = { Icon(Icons.Filled.EditNote, null) })
+                Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Tasks") }, icon = { Icon(Icons.Filled.TaskAlt, null) })
             }
-            OutlinedTextField(
-                value = query,
-                onValueChange = { vm.query.value = it },
-                placeholder = { Text(if (tab == 0) "Search meetings, people, transcripts" else "Search notes") },
-                leadingIcon = { Icon(Icons.Filled.Search, null) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (needsSetup) {
-                    item {
-                        BannerCard(
-                            icon = { Icon(Icons.Filled.Key, null) },
-                            title = "Finish setting up",
-                            body = "Download an on-device speech model for private transcription, and add a key for your AI model " +
-                                "(Command Code, OpenAI, Claude, Gemini, Ollama Cloud…). Tap to open Settings.",
-                            onClick = onOpenSettings,
-                        )
-                    }
-                }
-                val active = recording
-                if (active is RecordingState.Recording) {
-                    item {
-                        BannerCard(
-                            icon = { Icon(Icons.Filled.FiberManualRecord, null, tint = MaterialTheme.colorScheme.error) },
-                            title = if (active.paused) "Recording paused" else "Recording in progress",
-                            body = "${TranscriptFormatter.timestamp(active.elapsedMs)} · tap to view the live transcript",
-                            onClick = onOpenRecording,
-                        )
-                    }
-                }
-                if (tab == 0) {
-                    if (meetings.isEmpty()) {
+            if (tab == 2) {
+                TasksTab(onOpenMeeting = onOpenMeeting, modifier = Modifier.weight(1f))
+            } else {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { vm.query.value = it },
+                    placeholder = { Text(if (tab == 0) "Search meetings, people, transcripts" else "Search notes") },
+                    leadingIcon = { Icon(Icons.Filled.Search, null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                LazyColumn(
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (needsSetup) {
                         item {
-                            EmptyState(
-                                Icons.Filled.Groups,
-                                if (query.isBlank()) "No meetings yet" else "No matches",
-                                if (query.isBlank()) "Record a meeting to get a live transcript, summary, action items and answers to your questions." else "Try a different search.",
+                            BannerCard(
+                                icon = { Icon(Icons.Filled.Key, null) },
+                                title = "Finish setting up",
+                                body = "Download an on-device speech model for private transcription, and add a key for your AI model " +
+                                    "(Command Code, OpenAI, Claude, Gemini, Ollama Cloud…). Tap to open Settings.",
+                                onClick = onOpenSettings,
                             )
                         }
                     }
-                    items(meetings, key = { it.id }) { meeting ->
-                        MeetingRow(meeting, onClick = { onOpenMeeting(meeting.id) }, onDelete = {
-                            confirmDelete = { vm.deleteMeeting(meeting.id) }
-                        })
-                    }
-                } else {
-                    if (notes.isEmpty()) {
+                    val active = recording
+                    if (active is RecordingState.Recording) {
                         item {
-                            EmptyState(
-                                Icons.Filled.EditNote,
-                                if (query.isBlank()) "No notes yet" else "No matches",
-                                if (query.isBlank()) "Type or dictate notes and let AI tidy, summarise and pull out action items." else "Try a different search.",
+                            BannerCard(
+                                icon = { Icon(Icons.Filled.FiberManualRecord, null, tint = MaterialTheme.colorScheme.error) },
+                                title = if (active.paused) "Recording paused" else "Recording in progress",
+                                body = "${TranscriptFormatter.timestamp(active.elapsedMs)} · tap to view the live transcript",
+                                onClick = onOpenRecording,
                             )
                         }
                     }
-                    items(notes, key = { it.id }) { note ->
-                        NoteRow(note, onClick = { onOpenNote(note.id) }, onDelete = { confirmDelete = { vm.deleteNote(note.id) } })
+                    if (tab == 0 && query.isNotBlank()) {
+                        item {
+                            BannerCard(
+                                icon = { Icon(Icons.Filled.QuestionAnswer, null) },
+                                title = "Ask AI across all meetings",
+                                body = "\"${query.trim()}\"",
+                                onClick = { onAskAll(query.trim()) },
+                            )
+                        }
+                        if (searchResults.isEmpty()) {
+                            item { EmptyState(Icons.Filled.Search, "No matches", "Try other words, or ask the AI above.") }
+                        }
+                        items(searchResults, key = { it.meeting.id }) { result ->
+                            SearchResultRow(result, onOpen = { segmentId -> onOpenMeetingAt(result.meeting.id, segmentId) })
+                        }
+                    } else if (tab == 0) {
+                        if (meetings.isEmpty()) {
+                            item {
+                                EmptyState(
+                                    Icons.Filled.Groups,
+                                    if (query.isBlank()) "No meetings yet" else "No matches",
+                                    if (query.isBlank()) "Record a meeting to get a live transcript, summary, action items and answers to your questions." else "Try a different search.",
+                                )
+                            }
+                        }
+                        items(meetings, key = { it.id }) { meeting ->
+                            MeetingRow(meeting, onClick = { onOpenMeeting(meeting.id) }, onDelete = {
+                                confirmDelete = { vm.deleteMeeting(meeting.id) }
+                            })
+                        }
+                    } else {
+                        if (notes.isEmpty()) {
+                            item {
+                                EmptyState(
+                                    Icons.Filled.EditNote,
+                                    if (query.isBlank()) "No notes yet" else "No matches",
+                                    if (query.isBlank()) "Type or dictate notes and let AI tidy, summarise and pull out action items." else "Try a different search.",
+                                )
+                            }
+                        }
+                        items(notes, key = { it.id }) { note ->
+                            NoteRow(note, onClick = { onOpenNote(note.id) }, onDelete = { confirmDelete = { vm.deleteNote(note.id) } })
+                        }
                     }
                 }
             }
@@ -321,6 +356,41 @@ private fun NoteRow(note: Note, onClick: () -> Unit, onDelete: () -> Unit) {
                 }
             }
             IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete") }
+        }
+    }
+}
+
+@Composable
+private fun SearchResultRow(result: MeetingSearch.Result, onOpen: (segmentId: String?) -> Unit) {
+    val meeting = result.meeting
+    Card(Modifier.fillMaxWidth().clickable { onOpen(null) }) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(meeting.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(meeting.createdAt)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            result.hits.forEach { hit ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onOpen(hit.segmentId) }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Text(
+                        when (hit.field) {
+                            MeetingSearch.Field.TRANSCRIPT -> TranscriptFormatter.timestamp(hit.startMs ?: 0)
+                            MeetingSearch.Field.TITLE -> "Title"
+                            MeetingSearch.Field.PEOPLE -> "People"
+                            MeetingSearch.Field.SUMMARY -> "Summary"
+                            MeetingSearch.Field.ACTION_ITEM -> "Task"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.width(56.dp),
+                    )
+                    Text(hit.snippet, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+            }
         }
     }
 }

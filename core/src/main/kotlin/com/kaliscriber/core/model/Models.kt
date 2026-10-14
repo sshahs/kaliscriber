@@ -127,6 +127,8 @@ data class ActionItem(
     val dueDateIso: String? = null,
     val priority: String? = null,
     val done: Boolean = false,
+    /** True once the user changed the task, owner or due date; regenerating the summary keeps those edits. */
+    val edited: Boolean = false,
 )
 
 @Serializable
@@ -161,6 +163,29 @@ data class ChatMessage(
     val createdAt: Long,
     val excerpt: ExcerptRef? = null,
     val isError: Boolean = false,
+)
+
+/** A message in the "Ask across all meetings" conversation. */
+@Serializable
+data class AskMessage(
+    val id: String,
+    val role: ChatRole,
+    val content: String,
+    val createdAt: Long,
+    /** Meetings (and moments in them) the answer is based on. */
+    val sources: List<AskSource> = emptyList(),
+    val isError: Boolean = false,
+)
+
+/** A meeting an answer cites, optionally at a moment in its transcript. */
+@Serializable
+data class AskSource(
+    val meetingId: String,
+    val title: String,
+    val startMs: Long? = null,
+    val segmentId: String? = null,
+    /** How the answer refers to the meeting, e.g. "M2". */
+    val label: String = "",
 )
 
 /** A part of the meeting the user selected to ask about. */

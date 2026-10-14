@@ -13,11 +13,14 @@ import com.kaliscriber.app.recording.RecordingManager
 import com.kaliscriber.app.speech.LocalSpeechEngine
 import com.kaliscriber.app.speech.ModelManager
 import com.kaliscriber.app.speech.SpeechOutput
+import com.kaliscriber.app.tasks.TaskReminders
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.DefaultAiServices
 import com.kaliscriber.core.ai.MeetingAi
 import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.ai.defaultHttpClient
+import com.kaliscriber.core.ask.LibraryAsk
+import com.kaliscriber.core.model.AskMessage
 import com.kaliscriber.core.model.AudioChunk
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
@@ -32,6 +35,8 @@ import com.kaliscriber.core.store.NoteRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
@@ -44,6 +49,7 @@ class KaliScriberApp : Application() {
         super.onCreate()
         container = AppContainer(this)
         createNotificationChannel()
+        TaskReminders.createChannel(this)
     }
 
     private fun createNotificationChannel() {
@@ -98,6 +104,13 @@ class AppContainer(context: Context) {
     val exporter = MeetingExporter(appContext, http, secrets, settings)
     /** Long jobs started from a meeting screen, kept running in the background. */
     val jobs = MeetingJobs(appContext, scope)
+    /** "Ask across all meetings" and its conversation. */
+    val libraryAsk = LibraryAsk(
+        meetings,
+        JsonValueStore(File(filesDir, "ask-all.json"), ListSerializer(AskMessage.serializer()), emptyList()),
+        ai,
+        settings,
+    )
     val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope, onStart = {
         // Start fetching speaker detection now so it is ready when the meeting ends.
         if (speakerPackMissing) models.downloadDiarization()
@@ -111,6 +124,13 @@ class AppContainer(context: Context) {
         // Speech models downloaded before the speaker pack came bundled with them: fetch it on Wi-Fi.
         val metered = runCatching { appContext.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered }.getOrDefault(true)
         if (speakerPackMissing && models.readyAsrModels().isNotEmpty() && !metered) models.downloadDiarization()
+        // Keep the daily action-item reminder in step with its settings.
+        scope.launch {
+            settingsStore.value
+                .map { it.taskReminders to it.reminderHour }
+                .distinctUntilChanged()
+                .collect { runCatching { TaskReminders.schedule(appContext, settings()) } }
+        }
         scope.launch {
             meetings.load()
             notes.load()

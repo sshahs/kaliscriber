@@ -83,6 +83,8 @@ import kotlinx.coroutines.launch
 fun MeetingScreen(
     meetingId: String,
     initialTab: Int = 0,
+    /** A transcript line to scroll to and highlight, e.g. from search. */
+    focusSegmentId: String? = null,
     onBack: () -> Unit,
     onOpenNote: (String) -> Unit,
     onOpenSettings: () -> Unit,
@@ -202,7 +204,7 @@ fun MeetingScreen(
             }
             when (tab) {
                 0 -> SummaryTab(m, busy, vm, onOpenTranscriptAt = { ms -> vm.player.seekTo(ms) })
-                1 -> TranscriptTab(m, vm, onAskAboutSelection = {
+                1 -> TranscriptTab(m, vm, focusSegmentId = focusSegmentId, onAskAboutSelection = {
                     vm.askAboutSelection()
                     tab = 2
                 })

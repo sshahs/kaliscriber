@@ -17,6 +17,7 @@ import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.speakers.SpeakerAssigner
 import com.kaliscriber.core.speakers.VoiceLibrary
 import com.kaliscriber.core.store.MeetingRepository
+import com.kaliscriber.core.tasks.ActionItems
 import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
 import kotlinx.coroutines.CancellationException
@@ -530,8 +531,10 @@ class MeetingPipeline(
 
     suspend fun generateInsights(meetingId: String) {
         val meeting = repo.get(meetingId) ?: return
-        val insights = meetingAi.insights(meeting)
+        val fresh = meetingAi.insights(meeting)
         repo.update(meetingId) {
+            // Keep ticked-off and edited action items when the summary is regenerated.
+            val insights = fresh.copy(actionItems = ActionItems.carryOver(it.insights?.actionItems.orEmpty(), fresh.actionItems))
             it.copy(
                 insights = insights,
                 title = if (it.autoTitle && insights.title.isNotBlank()) insights.title else it.title,

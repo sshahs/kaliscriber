@@ -177,6 +177,10 @@ data class AppSettings(
     /** Rough cap on transcript characters sent to the LLM in one request. */
     val maxTranscriptChars: Int = 400_000,
     val export: ExportSettings = ExportSettings(),
+    /** Daily notification listing overdue action items and those due that day. */
+    val taskReminders: Boolean = true,
+    /** Hour of the day (0-23) the reminder is shown. */
+    val reminderHour: Int = 9,
 ) {
     fun settingsFor(id: ProviderId): ProviderSettings = providers[id] ?: ProviderSettings()
 

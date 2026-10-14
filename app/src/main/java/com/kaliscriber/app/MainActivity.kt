@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.kaliscriber.app.tasks.TaskReminders
 import com.kaliscriber.app.ui.AppNavigation
 import com.kaliscriber.app.ui.theme.KaliScriberTheme
 
@@ -17,9 +18,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val openTasks = intent?.getBooleanExtra(TaskReminders.EXTRA_OPEN_TASKS, false) == true
         setContent {
             KaliScriberTheme {
-                AppNavigation()
+                AppNavigation(openTasks = openTasks)
             }
         }
     }

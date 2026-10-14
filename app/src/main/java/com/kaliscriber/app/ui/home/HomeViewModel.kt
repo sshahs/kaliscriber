@@ -13,11 +13,14 @@ import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
+import com.kaliscriber.core.search.MeetingSearch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,6 +37,12 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
                 m.speakers.any { it.name.contains(q, true) } ||
                 m.segments.any { it.text.contains(q, true) }
         }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Meetings matching the search box, with the lines that matched; empty when it is blank. */
+    @OptIn(FlowPreview::class)
+    val searchResults: StateFlow<List<MeetingSearch.Result>> = combine(container.meetings.meetings, query.debounce(200)) { list, q ->
+        if (q.isBlank()) emptyList() else withContext(Dispatchers.Default) { MeetingSearch.search(list, q) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val notes: StateFlow<List<Note>> = combine(container.notes.notes, query) { list, q ->

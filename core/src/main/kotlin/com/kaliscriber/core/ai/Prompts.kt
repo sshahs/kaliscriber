@@ -72,6 +72,23 @@ object Prompts {
         append(meetingContext(meeting, transcript))
     }
 
+    /** For "Ask across all meetings": [context] holds labelled meeting excerpts from [MeetingSearch]. */
+    fun libraryAskSystem(context: String, today: Long, outputLanguage: String) = buildString {
+        appendLine("You are KaliScriber's assistant. Answer the user's question using their recorded meetings, excerpts of which are below. Today is ${formatDate(today)}.")
+        appendLine("- Each meeting is labelled [M1], [M2]… with its date. Cite the meeting and moment after each claim, like [M2 12:34], or [M2] for something from its summary.")
+        appendLine("- Use only what the excerpts say. If they don't answer the question, say so and suggest what to search for instead.")
+        appendLine("- Mention dates when the timing matters, and point out when meetings disagree or a decision changed later.")
+        appendLine("- Be concise. Markdown is supported.")
+        appendLine("- $PLACEHOLDER_RULE")
+        appendLine("- ${languageRule(outputLanguage)}")
+        appendLine()
+        appendLine("<meetings>")
+        appendLine(context)
+        appendLine("</meetings>")
+    }
+
+    const val SEARCH_KEYWORDS_SYSTEM = """You turn a question about past meetings into search keywords. Include the question's key terms, likely synonyms and related words someone might have said out loud (e.g. "pricing" -> "price", "cost", "discount"), and any names. Reply ONLY with JSON: {"keywords": ["...", "..."]} with at most 15 single words."""
+
     fun meetingContext(meeting: Meeting, transcript: String) = buildString {
         appendLine("Meeting: ${meeting.title}")
         appendLine("Date: ${formatDate(meeting.createdAt)}")
@@ -147,6 +164,6 @@ Return ONLY a compact JSON object. Give every segment index with its speaker. Do
         ${languageRule(outputLanguage)}
     """.trimIndent()
 
-    private fun formatDate(millis: Long): String =
+    fun formatDate(millis: Long): String =
         SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.ENGLISH).format(Date(millis))
 }
