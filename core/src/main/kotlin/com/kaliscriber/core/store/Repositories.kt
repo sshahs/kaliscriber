@@ -1,5 +1,6 @@
 package com.kaliscriber.core.store
 
+import com.kaliscriber.core.model.Bookmark
 import com.kaliscriber.core.model.ActionItem
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
@@ -96,6 +97,20 @@ class MeetingRepository(
             },
             segments = m.segments.map { if (it.speakerId == fromId) it.copy(speakerId = intoId) else it },
         )
+    }
+
+    suspend fun addBookmark(meetingId: String, atMs: Long, note: String = ""): Bookmark {
+        val bookmark = Bookmark(Ids.new(), atMs.coerceAtLeast(0), note.trim())
+        update(meetingId) { m -> m.copy(bookmarks = (m.bookmarks + bookmark).sortedBy { it.atMs }) }
+        return bookmark
+    }
+
+    suspend fun editBookmark(meetingId: String, id: String, note: String) = update(meetingId) { m ->
+        m.copy(bookmarks = m.bookmarks.map { if (it.id == id) it.copy(note = note.trim()) else it })
+    }
+
+    suspend fun deleteBookmark(meetingId: String, id: String) = update(meetingId) { m ->
+        m.copy(bookmarks = m.bookmarks.filterNot { it.id == id })
     }
 
     suspend fun reassignSegments(meetingId: String, segmentIds: Set<String>, speakerId: String) = update(meetingId) { m ->

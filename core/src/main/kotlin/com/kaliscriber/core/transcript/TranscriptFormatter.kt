@@ -72,6 +72,7 @@ object TranscriptFormatter {
             section("Next steps", insights.nextSteps)
             section("Risks", insights.risks)
         }
+        section("Bookmarks", meeting.bookmarks.map { b -> "[${timestamp(b.atMs)}]" + if (b.note.isNotBlank()) " ${b.note}" else "" })
         val gaps = meeting.gaps
         if (gaps != null && gaps.questions.isNotEmpty()) {
             appendLine("## Open questions")

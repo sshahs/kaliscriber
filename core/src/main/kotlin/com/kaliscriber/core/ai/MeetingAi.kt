@@ -120,6 +120,14 @@ class MeetingAi(
             appendLine("<transcript_part>")
             appendLine(TranscriptFormatter.forPrompt(meeting, part))
             appendLine("</transcript_part>")
+            val from = part.firstOrNull()?.startMs ?: 0
+            val to = (part.lastOrNull()?.endMs ?: 0) + BOOKMARK_GRACE_MS
+            val marks = meeting.bookmarks.filter { it.atMs in from..to }
+            if (marks.isNotEmpty()) {
+                appendLine("<bookmarks>")
+                appendLine(Prompts.bookmarkLines(marks))
+                appendLine("</bookmarks>")
+            }
         }
         return ai.chat().complete(
             LlmRequest(
@@ -423,4 +431,7 @@ class MeetingAi(
 
 /** How long one part of AI speaker separation may take before it is skipped. */
 internal const val SEPARATION_PART_TIMEOUT_MS = 5 * 60_000L
+
+/** Bookmarks this soon after a stretch of transcript still refer to it. */
+internal const val BOOKMARK_GRACE_MS = 30_000L
 private const val SEPARATION_OUTPUT_LIMIT = 16_000

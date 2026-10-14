@@ -43,6 +43,8 @@ data class Meeting(
     val timeline: List<TimelineEntry> = emptyList(),
     /** The calendar event this meeting was recorded for. */
     val calendarEvent: CalendarEvent? = null,
+    /** Moments the user marked while recording, oldest first. */
+    val bookmarks: List<Bookmark> = emptyList(),
     val updatedAt: Long = createdAt,
 ) {
     fun speaker(id: String?): Speaker? = speakers.firstOrNull { it.id == id }
@@ -83,6 +85,13 @@ data class Speaker(
 ) {
     fun hasLabel(l: String): Boolean = label == l || l in aliases
 }
+
+/**
+ * A moment the user marked as important while recording, at [atMs] into the meeting, with an
+ * optional note. It refers to what was said just before the mark.
+ */
+@Serializable
+data class Bookmark(val id: String, val atMs: Long, val note: String = "")
 
 /** One processing step: when it started, how long it took and whether it worked. */
 @Serializable

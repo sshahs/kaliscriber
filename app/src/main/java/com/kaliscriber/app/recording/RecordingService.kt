@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.kaliscriber.app.KaliScriberApp
 import com.kaliscriber.app.MainActivity
 import com.kaliscriber.app.R
+import com.kaliscriber.core.transcript.TranscriptFormatter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
@@ -71,6 +72,12 @@ class RecordingService : LifecycleService() {
             ACTION_PAUSE -> manager.setPaused(true)
             ACTION_RESUME -> manager.setPaused(false)
             ACTION_STOP -> manager.stop()
+            ACTION_BOOKMARK -> lifecycleScope.launch {
+                val mark = manager.bookmark() ?: return@launch
+                (manager.state.value as? RecordingState.Recording)?.let { state ->
+                    notify(buildNotification(state, step = "Bookmarked ${TranscriptFormatter.timestamp(mark.atMs)}"))
+                }
+            }
             else -> if (manager.state.value == RecordingState.Idle) stopSelfCleanly()
         }
         return START_NOT_STICKY
@@ -137,13 +144,14 @@ class RecordingService : LifecycleService() {
         when (state) {
             is RecordingState.Recording -> {
                 builder.setContentTitle(if (state.paused) "Recording paused" else "Recording meeting")
-                    .setContentText("Live transcription is running")
+                    .setContentText(step ?: "Live transcription is running")
                     .setUsesChronometer(!state.paused)
                     .setWhen(System.currentTimeMillis() - state.elapsedMs)
                 if (state.paused) {
                     builder.addAction(0, "Resume", serviceIntent(ACTION_RESUME, 1))
                 } else {
                     builder.addAction(0, "Pause", serviceIntent(ACTION_PAUSE, 2))
+                    builder.addAction(0, "Bookmark", serviceIntent(ACTION_BOOKMARK, 4))
                 }
                 builder.addAction(0, "Stop", serviceIntent(ACTION_STOP, 3))
             }
@@ -167,6 +175,7 @@ class RecordingService : LifecycleService() {
         const val ACTION_PAUSE = "com.kaliscriber.app.PAUSE"
         const val ACTION_RESUME = "com.kaliscriber.app.RESUME"
         const val ACTION_STOP = "com.kaliscriber.app.STOP"
+        const val ACTION_BOOKMARK = "com.kaliscriber.app.BOOKMARK"
         private const val NOTIFICATION_ID = 42
         /** Safety net so a stuck job can never keep the phone awake forever. */
         private const val MAX_WAKE_MS = 6L * 60 * 60 * 1000

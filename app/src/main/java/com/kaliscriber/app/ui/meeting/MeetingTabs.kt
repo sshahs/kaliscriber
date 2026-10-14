@@ -8,20 +8,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.Headphones
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RecordVoiceOver
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
-import java.io.File
-import com.kaliscriber.app.ui.recording.ExpectedSpeakersRow
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -50,7 +36,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -58,10 +46,17 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Subject
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.Topic
@@ -80,6 +75,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -96,24 +92,34 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kaliscriber.app.ui.common.BookmarkMarker
 import com.kaliscriber.app.ui.common.BulletList
 import com.kaliscriber.app.ui.common.EmptyState
 import com.kaliscriber.app.ui.common.MarkdownText
 import com.kaliscriber.app.ui.common.SectionCard
 import com.kaliscriber.app.ui.common.SpeakerBadge
 import com.kaliscriber.app.ui.common.StreamingAnswer
+import com.kaliscriber.app.ui.common.bookmarksByLine
+import com.kaliscriber.app.ui.recording.ExpectedSpeakersRow
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Speaker
 import com.kaliscriber.core.model.TranscriptSegment
 import com.kaliscriber.core.transcript.TranscriptFormatter
+import java.io.File
 
 /** Parses "mm:ss" or "h:mm:ss" (optionally in brackets) into milliseconds. */
+/** How far before a bookmark playback and the transcript start: the mark is about what was just said. */
+private const val BOOKMARK_LEAD_MS = 20_000L
+
 private fun parseTimestamp(text: String?): Long? {
     val parts = text?.trim()?.trim('[', ']')?.split(":")?.map { it.trim().toLongOrNull() ?: return null } ?: return null
     return when (parts.size) {
@@ -175,6 +181,17 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
                                     Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+        if (meeting.bookmarks.isNotEmpty()) {
+            item {
+                SectionCard("Your bookmarks", Icons.Filled.Bookmark) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        meeting.bookmarks.forEach { mark ->
+                            BookmarkMarker(mark, onClick = { onOpenTranscriptAt((mark.atMs - BOOKMARK_LEAD_MS).coerceAtLeast(0)) })
                         }
                     }
                 }
@@ -388,6 +405,7 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
+        val marks = bookmarksByLine(meeting)
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 24.dp)) {
             items(meeting.segments, key = { it.id }) { seg ->
                 val selected = seg.id in selection
@@ -414,6 +432,10 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
                         Text(TranscriptFormatter.timestamp(seg.startMs), style = MaterialTheme.typography.labelSmall)
                     }
                     Text(seg.text, style = MaterialTheme.typography.bodyLarge)
+                    // A mark refers to what was said just before it, so playback starts a little earlier.
+                    marks[seg.id]?.forEach { mark ->
+                        BookmarkMarker(mark, onClick = { vm.player.seekTo((mark.atMs - BOOKMARK_LEAD_MS).coerceAtLeast(0)) })
+                    }
                 }
             }
         }

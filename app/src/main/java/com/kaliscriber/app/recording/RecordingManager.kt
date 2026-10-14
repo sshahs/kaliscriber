@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.core.content.ContextCompat
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.model.AudioChunk
+import com.kaliscriber.core.model.Bookmark
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.pipeline.MeetingPipeline
 import com.kaliscriber.core.store.MeetingRepository
@@ -146,6 +147,13 @@ class RecordingManager(
 
     fun stop() {
         scope.launch { stopAndProcess() }
+    }
+
+    /** Marks the current moment of the meeting being recorded as important. Null when not recording. */
+    suspend fun bookmark(note: String = ""): Bookmark? {
+        val current = _state.value as? RecordingState.Recording ?: return null
+        if (current.meetingId.isEmpty()) return null
+        return meetings.addBookmark(current.meetingId, current.elapsedMs, note)
     }
 
     private class Stopped(val meetingId: String, val durationMs: Long, val file: File?)

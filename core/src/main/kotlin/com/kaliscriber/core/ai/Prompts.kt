@@ -1,5 +1,6 @@
 package com.kaliscriber.core.ai
 
+import com.kaliscriber.core.model.Bookmark
 import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
@@ -61,9 +62,17 @@ object Prompts {
         appendLine("- open questions, risks and concerns")
         appendLine("- notable quotes with their [mm:ss] timestamps")
         appendLine("Speaker labels are not reliable yet: attribute things only to people named in the speech, never to the speaker labels.")
+        appendLine("Moments the user bookmarked matter most: cover them fully, starting with \"★\".")
         appendLine("Keep every fact, number and name; no filler. At most 250 words. ${languageRule(outputLanguage)}")
         glossaryBlock(glossary)?.let { append(it) }
     }
+
+    const val BOOKMARKS_RULE =
+        "The user marked these moments as important while recording. Each mark refers to what was said in the half minute before its time. " +
+            "Give them extra weight: reflect each in the summary, key points, decisions or action items, and use its note if there is one."
+
+    fun bookmarkLines(bookmarks: List<Bookmark>): String =
+        bookmarks.joinToString("\n") { b -> "- [${TranscriptFormatter.timestamp(b.atMs)}]" + if (b.note.isNotBlank()) " ${b.note}" else "" }
 
     const val TASK_INSIGHTS = "# Task: meeting notes"
     const val TASK_GAPS = "# Task: gaps and questions"
@@ -187,6 +196,13 @@ object Prompts {
             appendLine("<summary>")
             appendLine(insights.summary)
             appendLine("</summary>")
+        }
+        if (meeting.bookmarks.isNotEmpty()) {
+            appendLine()
+            appendLine("<bookmarks>")
+            appendLine(BOOKMARKS_RULE)
+            appendLine(bookmarkLines(meeting.bookmarks))
+            appendLine("</bookmarks>")
         }
         val answered = meeting.gaps?.questions.orEmpty().filter { !it.answer.isNullOrBlank() }
         if (answered.isNotEmpty()) {

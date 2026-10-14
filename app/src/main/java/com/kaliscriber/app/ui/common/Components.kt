@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -51,7 +52,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kaliscriber.app.ui.theme.speakerColor
+import com.kaliscriber.core.model.Bookmark
+import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.Speaker
+import com.kaliscriber.core.transcript.TranscriptFormatter
 
 @Composable
 fun SpeakerBadge(speaker: Speaker?, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
@@ -150,6 +154,35 @@ fun <T> DropdownSelector(
                 })
             }
         }
+    }
+}
+
+/** For each transcript line, the bookmarks to show after it: those made while it was the latest line. */
+fun bookmarksByLine(meeting: Meeting): Map<String, List<Bookmark>> {
+    if (meeting.bookmarks.isEmpty() || meeting.segments.isEmpty()) return emptyMap()
+    return meeting.bookmarks.groupBy { b ->
+        (meeting.segments.lastOrNull { it.startMs <= b.atMs } ?: meeting.segments.first()).id
+    }
+}
+
+/** A moment the user marked while recording. */
+@Composable
+fun BookmarkMarker(bookmark: Bookmark, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Bookmark, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "Marked ${TranscriptFormatter.timestamp(bookmark.atMs)}" + if (bookmark.note.isNotBlank()) " · ${bookmark.note}" else "",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+        )
     }
 }
 
