@@ -38,6 +38,8 @@ data class Meeting(
     val processingProgress: Float? = null,
     /** How many people are in the meeting, if the user said; null lets the app detect it. */
     val expectedSpeakers: Int? = null,
+    /** What processing did and how long each step took, oldest first. */
+    val timeline: List<TimelineEntry> = emptyList(),
     val updatedAt: Long = createdAt,
 ) {
     fun speaker(id: String?): Speaker? = speakers.firstOrNull { it.id == id }
@@ -76,6 +78,15 @@ data class Speaker(
 ) {
     fun hasLabel(l: String): Boolean = label == l || l in aliases
 }
+
+/** One processing step: when it started, how long it took and whether it worked. */
+@Serializable
+data class TimelineEntry(
+    val label: String,
+    val at: Long,
+    val durationMs: Long = 0,
+    val ok: Boolean = true,
+)
 
 @Serializable
 data class TranscriptSegment(

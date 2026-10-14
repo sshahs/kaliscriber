@@ -8,19 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.filled.Article
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Event
-import androidx.compose.material.icons.filled.IosShare
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.SnackbarResult
-import com.kaliscriber.app.export.ExportTarget
-import com.kaliscriber.app.export.GoogleAuth
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,9 +16,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -39,19 +35,23 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -73,11 +73,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaliscriber.app.appViewModel
+import com.kaliscriber.app.export.ExportTarget
+import com.kaliscriber.app.export.GoogleAuth
 import com.kaliscriber.app.ui.common.shareText
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun MeetingScreen(
@@ -100,6 +104,7 @@ fun MeetingScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var showTimeline by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(Unit) {
@@ -179,6 +184,7 @@ fun MeetingScreen(
                             menuOpen = false
                             scope.launch { vm.saveAsNote()?.let(onOpenNote) }
                         })
+                        DropdownMenuItem(text = { Text("Processing details") }, onClick = { menuOpen = false; showTimeline = true })
                         DropdownMenuItem(text = { Text("AI settings") }, onClick = { menuOpen = false; onOpenSettings() })
                         DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; confirmDelete = true })
                     }
@@ -242,6 +248,14 @@ fun MeetingScreen(
             text = { OutlinedTextField(title, { title = it }, singleLine = true) },
             confirmButton = { TextButton(onClick = { vm.renameMeeting(title); renaming = false }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
+        )
+    }
+    if (showTimeline) {
+        AlertDialog(
+            onDismissRequest = { showTimeline = false },
+            title = { Text("Processing details") },
+            text = { TimelineList(m) },
+            confirmButton = { TextButton(onClick = { showTimeline = false }) { Text("Close") } },
         )
     }
     if (confirmDelete) {
@@ -383,5 +397,52 @@ private fun PlayerBar(player: AudioPlayer) {
             Text(TranscriptFormatter.timestamp(duration), style = MaterialTheme.typography.labelSmall)
             Spacer(Modifier.width(4.dp))
         }
+    }
+}
+
+/** Each processing step with its duration, and how long the meeting took to be ready after stopping. */
+@Composable
+private fun TimelineList(meeting: Meeting) {
+    val entries = meeting.timeline
+    if (entries.isEmpty()) {
+        Text("Nothing recorded yet. Steps appear here as the meeting is processed.")
+        return
+    }
+    val time = remember { DateFormat.getTimeInstance(DateFormat.MEDIUM) }
+    val stopped = entries.lastOrNull { it.label == "Recording stopped" }
+    val ready = entries.lastOrNull { it.label.startsWith("Ready") }
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (stopped != null && ready != null && ready.at >= stopped.at) {
+            Text(
+                "Ready ${duration(ready.at - stopped.at)} after you stopped recording",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        entries.forEach { e ->
+            Row(verticalAlignment = Alignment.Top) {
+                Text(
+                    time.format(Date(e.at)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(72.dp),
+                )
+                Text(
+                    e.label + if (e.durationMs >= 1_000) " · ${duration(e.durationMs)}" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (e.ok) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+private fun duration(ms: Long): String {
+    val s = ms / 1000
+    return when {
+        s < 60 -> "${s}s"
+        s < 3600 -> "${s / 60}m ${s % 60}s"
+        else -> "${s / 3600}h ${s % 3600 / 60}m"
     }
 }

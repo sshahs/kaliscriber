@@ -18,6 +18,7 @@ import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingSection
 import com.kaliscriber.core.model.MeetingStatus
+import com.kaliscriber.core.model.TimelineEntry
 import com.kaliscriber.core.speakers.BlockMerge
 import com.kaliscriber.core.speakers.SpeakerAssigner
 import com.kaliscriber.core.speakers.StableSpeakers
@@ -94,6 +95,9 @@ class MeetingPipeline(
 
     private val live = ConcurrentHashMap<String, LiveSession>()
 
+    /** Per meeting: parts transcribed while recording, the time that took and the audio length (ms). */
+    private val chunkStats = ConcurrentHashMap<String, LongArray>()
+
     /** The on-device diarizer when speakers should be detected during recording, else null. */
     private fun liveDiarizer(): SpeakerDiarizer? {
         val s = settings()
@@ -138,6 +142,12 @@ class MeetingPipeline(
                     session.diarizationFailed = true
                 } else {
                     session.blocks += result
+                    addToTimeline(
+                        meetingId,
+                        "Speakers in ${TranscriptFormatter.timestamp(block.first().startMs)}–${TranscriptFormatter.timestamp(block.last().endMs)}" +
+                            if (final) "" else " (while recording)",
+                        started,
+                    )
                     log(
                         "Live speaker detection: ${TranscriptFormatter.timestamp(block.first().startMs)}–" +
                             "${TranscriptFormatter.timestamp(block.last().endMs)} in ${(clock.now() - started) / 1000}s, ${result.voices.size} voices",
@@ -230,6 +240,7 @@ class MeetingPipeline(
                 return
             }
             log("Running notes for ${TranscriptFormatter.timestamp(from)}–${TranscriptFormatter.timestamp(part.last().endMs)} in ${(clock.now() - started) / 1000}s")
+            addToTimeline(meetingId, "Notes for ${TranscriptFormatter.timestamp(from)}–${TranscriptFormatter.timestamp(part.last().endMs)} (while recording)", started)
             repo.update(meetingId) { it.copy(sections = it.sections + MeetingSection(from, part.last().endMs, notes)) }
         }
     }
@@ -237,16 +248,31 @@ class MeetingPipeline(
     /** Shows what processing is doing on the meeting, and logs how long each step takes. */
     private suspend fun <T> stage(meetingId: String, label: String, block: suspend () -> T): T {
         repo.update(meetingId) { it.copy(processingStep = label, processingProgress = null) }
+        return timed(meetingId, label, block)
+    }
+
+    /** Runs [block] and notes how long it took in the log and on the meeting's timeline. */
+    private suspend fun <T> timed(meetingId: String, label: String, block: suspend () -> T): T {
         val started = clock.now()
         log("$label: started")
         try {
-            return block().also { log("$label: done in ${(clock.now() - started) / 1000}s") }
+            return block().also {
+                log("$label: done in ${(clock.now() - started) / 1000}s")
+                addToTimeline(meetingId, label, started)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             log("$label: failed after ${(clock.now() - started) / 1000}s: ${describe(e)}")
+            addToTimeline(meetingId, label, started, ok = false)
             throw e
         }
+    }
+
+    /** Adds a step that began at [started] (and ends now) to the meeting's timeline. */
+    private suspend fun addToTimeline(meetingId: String, label: String, started: Long, ok: Boolean = true) {
+        val entry = TimelineEntry(label, started, (clock.now() - started).coerceAtLeast(0), ok)
+        repo.update(meetingId) { it.copy(timeline = (it.timeline + entry).takeLast(MAX_TIMELINE)) }
     }
 
     private suspend fun progress(meetingId: String, fraction: Float) {
@@ -263,6 +289,14 @@ class MeetingPipeline(
             val result = transcribeFile(File(chunk.path), chunk.endMs - chunk.startMs, repo.get(meetingId)?.expectedSpeakers)
             log("Chunk ${chunk.index} (${(chunk.endMs - chunk.startMs) / 1000}s audio): ${result.segments.size} segments in ${clock.now() - started} ms")
             appendChunk(meetingId, chunk, result)
+            if (recording) {
+                val stats = chunkStats.getOrPut(meetingId) { LongArray(3) }
+                synchronized(stats) {
+                    stats[0]++
+                    stats[1] += clock.now() - started
+                    stats[2] += chunk.endMs - chunk.startMs
+                }
+            }
             // Live speaker detection still needs the audio; it removes the file when the meeting ends.
             val neededLive = live[meetingId]?.let { it.detectsSpeakers && !it.diarizationFailed } ?: (recording && liveDiarizer() != null)
             if (!neededLive) deleteQuietly(chunk.path)
@@ -320,6 +354,11 @@ class MeetingPipeline(
 
     /** Called once recording has stopped and [audioFile] (the full recording) is finalized. */
     suspend fun finishRecording(meetingId: String, audioFile: File?, durationMs: Long) {
+        chunkStats.remove(meetingId)?.let { (parts, tookMs, audioMs) ->
+            val first = clock.now() - durationMs
+            addToTimeline(meetingId, "Transcribed $parts parts while recording (${audioMs / 60_000} min of audio in ${tookMs / 1000}s)", first)
+        }
+        addToTimeline(meetingId, "Recording stopped", clock.now())
         repo.update(meetingId) {
             it.copy(
                 status = MeetingStatus.TRANSCRIBING,
@@ -363,7 +402,9 @@ class MeetingPipeline(
                         "limit of ${stt.config.id.displayName}. Choose Deepgram or AssemblyAI for long recordings.",
                 )
             }
-            val result = transcribeFile(audioFile, durationMs, repo.get(meetingId)?.expectedSpeakers)
+            val result = stage(meetingId, "Transcribing with ${stt.config.id.displayName}") {
+                transcribeFile(audioFile, durationMs, repo.get(meetingId)?.expectedSpeakers)
+            }
             replaceTranscript(meetingId, result, durationMs)
             if (!result.diarized) detection = applyLocalDiarization(meetingId, audioFile)
         } catch (e: CancellationException) {
@@ -518,10 +559,11 @@ class MeetingPipeline(
         if (aiSteps.isNotEmpty()) {
             stage(meetingId, "Writing summary, action items and questions") {
                 coroutineScope {
-                    aiSteps.map { (name, block) -> async { step(errors, name) { timed(name) { block() } } } }.awaitAll()
+                    aiSteps.map { (name, block) -> async { step(errors, name) { timed(meetingId, name) { block() } } } }.awaitAll()
                 }
             }
         }
+        addToTimeline(meetingId, if (errors.isEmpty()) "Ready" else "Ready, with problems", clock.now(), ok = errors.isEmpty())
         repo.update(meetingId) {
             it.copy(
                 status = MeetingStatus.READY,
@@ -537,11 +579,6 @@ class MeetingPipeline(
     fun needsSpeakerSeparation(meeting: Meeting): Boolean =
         !meeting.speakersFinal && meeting.segments.isNotEmpty() &&
             meeting.segments.all { seg -> meeting.speaker(seg.speakerId)?.label == SpeakerAssigner.UNKNOWN_LABEL }
-
-    private suspend fun <T> timed(name: String, block: suspend () -> T): T {
-        val started = clock.now()
-        return block().also { log("$name: done in ${(clock.now() - started) / 1000}s") }
-    }
 
     private suspend fun step(errors: MutableList<String>, name: String, block: suspend () -> Unit) {
         try {
@@ -819,6 +856,8 @@ class MeetingPipeline(
         const val LIVE_NOTES_MS = 10 * 60_000L
 
         const val MIN_VOICEPRINT_SEGMENT_MS = 1_000L
+        /** Timeline entries kept per meeting; reprocessing adds more. */
+        const val MAX_TIMELINE = 80
         const val MAX_VOICEPRINT_MS = 45_000L
     }
 

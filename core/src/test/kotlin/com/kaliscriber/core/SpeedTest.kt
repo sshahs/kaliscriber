@@ -156,6 +156,14 @@ class SpeedTest {
         val summaryRequest = fake.requests.last { it.system.contains(Prompts.TASK_INSIGHTS) }
         assertTrue(summaryRequest.system.contains("Notes written while the meeting was recorded"))
         assertEquals("Sync", m.title)
+
+        // Each step is on the meeting's timeline.
+        val labels = m.timeline.map { it.label }
+        assertTrue(labels.any { it.startsWith("Speakers in 00:00") && it.endsWith("(while recording)") }, labels.toString())
+        assertTrue(labels.any { it.startsWith("Notes for 00:00") }, labels.toString())
+        assertTrue(labels.any { it.startsWith("Transcribed 21 parts while recording") }, labels.toString())
+        assertTrue("Summary" in labels && "Gaps & questions" in labels, labels.toString())
+        assertTrue(labels.indexOf("Recording stopped") in 0 until labels.indexOfFirst { it.startsWith("Ready") }, labels.toString())
     }
 
     @Test
