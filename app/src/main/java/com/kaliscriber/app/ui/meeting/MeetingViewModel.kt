@@ -237,9 +237,23 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
                     }
                     if (question.isBlank()) continue
                     _voicePhase.value = VoicePhase.THINKING
-                    val answer = pipeline.ask(meetingId, question, excerpt = null, spoken = true).getOrNull() ?: break
+                    // Each sentence is spoken as soon as it is written.
+                    val live = speech.live(VOICE_KEY, viewModelScope)
+                    val answer = try {
+                        pipeline.ask(meetingId, question, excerpt = null, spoken = true) { partial ->
+                            live.feed(partial)
+                            if (speaking.value == VOICE_KEY) _voicePhase.value = VoicePhase.SPEAKING
+                        }.getOrNull()
+                    } catch (e: Exception) {
+                        live.cancel()
+                        throw e
+                    }
+                    if (answer == null) {
+                        live.cancel()
+                        break
+                    }
                     _voicePhase.value = VoicePhase.SPEAKING
-                    speech.speak(VOICE_KEY, answer)
+                    live.finish(answer)
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e

@@ -10,13 +10,17 @@ import com.kaliscriber.core.ai.AiException
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.DefaultAiServices
 import com.kaliscriber.core.ai.TtsEngine
+import com.kaliscriber.core.ai.tts.SentenceStream
 import com.kaliscriber.core.ai.tts.SpeechText
 import com.kaliscriber.core.audio.Wav
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -93,7 +97,79 @@ class SpeechOutput(
         }
     }
 
+    /** Bumped by [stop], so speech that is still being queued knows it was stopped. */
+    @Volatile private var generation = 0
+
+    /**
+     * Speaks an answer while it is still being written: each sentence is spoken as soon as it is
+     * complete, so speech starts after the first sentence rather than after the whole answer.
+     */
+    fun live(key: String, scope: CoroutineScope): LiveSpeech {
+        stop()
+        return LiveSpeech(key, scope, generation)
+    }
+
+    inner class LiveSpeech internal constructor(private val key: String, scope: CoroutineScope, private val gen: Int) {
+        private val sentences = SentenceStream()
+        private val queue = Channel<String>(Channel.UNLIMITED)
+        private val job = scope.launch { speakQueue() }
+
+        /** The answer so far; safe to call from any thread. */
+        fun feed(partial: String) {
+            sentences.feed(partial).forEach { queue.trySend(it) }
+        }
+
+        /** The finished answer: speaks what is left and waits until all of it has been said. */
+        suspend fun finish(full: String) {
+            sentences.finish(full).forEach { queue.trySend(it) }
+            queue.close()
+            job.join()
+        }
+
+        fun cancel() {
+            queue.close()
+            job.cancel()
+            if (generation == gen) stop()
+        }
+
+        private suspend fun speakQueue() {
+            try {
+                when (settings().ttsEngine) {
+                    TtsEngine.DEVICE -> {
+                        val engine = deviceTts()
+                        val waits = mutableListOf<CompletableDeferred<Boolean>>()
+                        var n = 0
+                        for (sentence in queue) {
+                            if (generation != gen) return
+                            _speaking.value = key
+                            for (part in SpeechText.split(sentence, maxDeviceChars())) {
+                                val id = "$key#live${n++}"
+                                val done = CompletableDeferred<Boolean>().also { pending[id] = it }
+                                // Queued behind the sentences before it, so speech runs on without gaps.
+                                withContext(Dispatchers.Main) { engine.speak(part, TextToSpeech.QUEUE_ADD, null, id) }
+                                waits += done
+                            }
+                        }
+                        for (wait in waits) if (!wait.await()) break
+                    }
+                    TtsEngine.ELEVENLABS -> for (sentence in queue) {
+                        if (generation != gen) return
+                        _speaking.value = key
+                        val audio = withContext(Dispatchers.IO) {
+                            File(context.cacheDir, "speech-live.mp3").apply { writeBytes(ai.elevenLabsTts().synthesize(sentence)) }
+                        }
+                        if (generation != gen) return
+                        playFile(key, audio)
+                    }
+                }
+            } finally {
+                if (_speaking.value == key && generation == gen) _speaking.value = null
+            }
+        }
+    }
+
     fun stop() {
+        generation++
         _speaking.value = null
         tts?.stop()
         pending.values.forEach { it.complete(false) }
