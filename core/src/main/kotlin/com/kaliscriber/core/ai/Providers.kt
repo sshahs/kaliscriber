@@ -195,6 +195,8 @@ data class AppSettings(
     val keepRecordingsDays: Int = 0,
     /** Which microphone to record meetings with. */
     val microphone: Microphone = Microphone.AUTO,
+    /** While recording, the headphones' play/pause button adds a bookmark. */
+    val headsetBookmarks: Boolean = true,
     /** Prices the user entered, per "provider/model", to estimate what AI requests cost. */
     val modelPrices: Map<String, com.kaliscriber.core.ai.usage.ModelPrice> = emptyMap(),
     /**

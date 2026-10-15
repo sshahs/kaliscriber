@@ -936,6 +936,11 @@ private fun ProcessingSettings(settings: AppSettings, vm: SettingsViewModel) {
                 "Turn off if transcripts get worse on your phone.",
             settings.audioCleanup,
         ) { v -> vm.update { it.copy(audioCleanup = v) } }
+        ToggleRow(
+            "Bookmark with the headphone button",
+            "While recording, pressing play/pause on wired or Bluetooth headphones marks the moment. The phone buzzes to confirm.",
+            settings.headsetBookmarks,
+        ) { v -> vm.update { it.copy(headsetBookmarks = v) } }
         DropdownSelector(
             label = "Microphone",
             options = Microphone.entries,

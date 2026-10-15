@@ -32,6 +32,8 @@ class RecordingService : LifecycleService() {
     private var observer: Job? = null
     private var stepObserver: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    /** The headphone button, which adds bookmarks while recording. */
+    private var headset: HeadsetButtons? = null
 
     /**
      * Without a wake lock the CPU can sleep once the screen is off, which stalls on-device
@@ -53,8 +55,24 @@ class RecordingService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        releaseHeadset()
         releaseWakeLock()
         super.onDestroy()
+    }
+
+    private fun releaseHeadset() {
+        headset?.let { runCatching { it.release() } }
+        headset = null
+    }
+
+    /** Bookmarks the current moment and says so in the notification. */
+    private fun bookmarkNow() {
+        lifecycleScope.launch {
+            val mark = manager.bookmark() ?: return@launch
+            (manager.state.value as? RecordingState.Recording)?.let { state ->
+                notify(buildNotification(state, step = "Bookmarked ${TranscriptFormatter.timestamp(mark.atMs)}"))
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -68,16 +86,17 @@ class RecordingService : LifecycleService() {
                     return START_NOT_STICKY
                 }
                 observeState()
-            }
-            ACTION_PAUSE -> manager.setPaused(true)
-            ACTION_RESUME -> manager.setPaused(false)
-            ACTION_STOP -> manager.stop()
-            ACTION_BOOKMARK -> lifecycleScope.launch {
-                val mark = manager.bookmark() ?: return@launch
-                (manager.state.value as? RecordingState.Recording)?.let { state ->
-                    notify(buildNotification(state, step = "Bookmarked ${TranscriptFormatter.timestamp(mark.atMs)}"))
+                if (container.settings().headsetBookmarks && headset == null) {
+                    headset = runCatching { HeadsetButtons(this) { bookmarkNow() } }.getOrNull()
                 }
             }
+            ACTION_PAUSE -> manager.setPaused(true)
+            ACTION_RESUME -> {
+                manager.setPaused(false)
+                headset?.claimButtons()
+            }
+            ACTION_STOP -> manager.stop()
+            ACTION_BOOKMARK -> bookmarkNow()
             else -> if (manager.state.value == RecordingState.Idle) stopSelfCleanly()
         }
         return START_NOT_STICKY
@@ -99,6 +118,8 @@ class RecordingService : LifecycleService() {
                     when (state) {
                         RecordingState.Idle -> stopSelfCleanly()
                         is RecordingState.Finishing -> {
+                            // The recording is over, so the headphone button is the user's again.
+                            releaseHeadset()
                             notify(buildNotification(state))
                             // Mirror the processing step ("Detecting speakers… 40%") in the notification.
                             stepObserver = lifecycleScope.launch {
@@ -124,6 +145,7 @@ class RecordingService : LifecycleService() {
     }
 
     private fun stopSelfCleanly() {
+        releaseHeadset()
         releaseWakeLock()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
