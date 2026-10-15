@@ -7,6 +7,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.util.Log
 import com.kaliscriber.app.calendar.CalendarService
+import com.kaliscriber.app.data.AndroidSqlDb
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.app.export.MeetingExporter
 import com.kaliscriber.app.importing.AudioImporter
@@ -29,10 +30,11 @@ import com.kaliscriber.core.ai.defaultHttpClient
 import com.kaliscriber.core.ask.LibraryAsk
 import com.kaliscriber.core.model.AskMessage
 import com.kaliscriber.core.model.AudioChunk
-import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
 import com.kaliscriber.core.pipeline.MeetingPipeline
+import com.kaliscriber.core.search.SearchIndexer
+import com.kaliscriber.core.search.TranscriptIndex
 import com.kaliscriber.core.speakers.VoiceLibrary
 import com.kaliscriber.core.speakers.VoiceProfile
 import com.kaliscriber.core.store.JsonDocumentStore
@@ -94,10 +96,10 @@ class AppContainer(context: Context) {
     val meetingAi = MeetingAi(ai, settings)
     val speech = SpeechOutput(appContext, ai, settings)
 
-    val meetings = MeetingRepository(
-        JsonDocumentStore(File(filesDir, "meetings"), Meeting.serializer(), idOf = { it.id }, persisted = MeetingRepository.PERSISTED),
-        audioRoot = File(filesDir, "audio"),
-    )
+    /** Meetings in files/meetings, their transcripts in files/transcripts and audio in files/audio. */
+    val meetings = MeetingRepository.inDir(filesDir)
+    /** Full-text index of every transcript line, so search doesn't need transcripts in memory. */
+    val searchIndex by lazy { TranscriptIndex(AndroidSqlDb(appContext.getDatabasePath("search.db"))) }
     val notes = NoteRepository(JsonDocumentStore(File(filesDir, "notes"), Note.serializer()) { it.id })
     /** Remembered voices (on-device voiceprints) for recognising people across meetings. */
     val voices = VoiceLibrary(
@@ -125,6 +127,7 @@ class AppContainer(context: Context) {
         JsonValueStore(File(filesDir, "ask-all.json"), ListSerializer(AskMessage.serializer()), emptyList()),
         ai,
         settings,
+        corpus = { searchIndex },
     )
     /** Events from the CalDAV calendar, for meeting titles, invitees and prep. */
     val calendar = CalendarService(http, settings, secrets)
@@ -143,6 +146,8 @@ class AppContainer(context: Context) {
         // Speech models downloaded before the speaker pack came bundled with them: fetch it on Wi-Fi.
         val metered = runCatching { appContext.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered }.getOrDefault(true)
         if (speakerPackMissing && models.readyAsrModels().isNotEmpty() && !metered) models.downloadDiarization()
+        // Index transcripts for search in the background (all of them the first time).
+        scope.launch(Dispatchers.IO) { SearchIndexer(meetings, searchIndex, scope, log = { Log.i("KaliScriber", it) }).start() }
         // The Quick Settings tile and home-screen widget show whether a meeting is being recorded.
         scope.launch {
             recorder.state

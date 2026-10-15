@@ -13,6 +13,7 @@ import com.kaliscriber.core.model.AskMessage
 import com.kaliscriber.core.model.AskSource
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.search.MeetingSearch
+import com.kaliscriber.core.search.SearchCorpus
 import com.kaliscriber.core.store.JsonValueStore
 import com.kaliscriber.core.store.MeetingRepository
 import com.kaliscriber.core.util.Clock
@@ -30,6 +31,8 @@ class LibraryAsk(
     private val history: JsonValueStore<List<AskMessage>>,
     private val ai: AiServices,
     private val settings: () -> AppSettings,
+    /** Where transcript passages are found: the search index, or the meetings themselves in tests. */
+    private val corpus: () -> SearchCorpus,
     private val clock: Clock = Clock.System,
 ) {
     val messages: StateFlow<List<AskMessage>> = history.value
@@ -58,13 +61,13 @@ class LibraryAsk(
     }
 
     private suspend fun answer(question: String, previous: List<AskMessage>, onText: ((String) -> Unit)?): AskMessage {
-        val all = meetings.all().filter { it.segments.isNotEmpty() || it.insights != null }
+        val all = meetings.all().filter { it.hasTranscript || it.insights != null }
         if (all.isEmpty()) throw AiException("There are no transcribed meetings to search yet.")
         // Follow-ups ("and who owns it?") lean on the previous question for what to look up.
         val lastQuestion = previous.lastOrNull { it.role == ChatRole.USER && !it.isError }?.content
         val keywords = (expandKeywords(question) + MeetingSearch.terms(question) + MeetingSearch.terms(lastQuestion.orEmpty())).distinct()
         val budget = settings().maxTranscriptChars.coerceAtMost(CONTEXT_BUDGET)
-        val sources = MeetingSearch.retrieve(all, keywords, budget)
+        val sources = MeetingSearch.retrieve(all, corpus(), keywords, budget)
         val context = sources.joinToString("\n") { MeetingSearch.render(it, Prompts::formatDate) }
 
         val turns = previous.filter { !it.isError }.takeLast(10).map {
@@ -72,7 +75,7 @@ class LibraryAsk(
         } + LlmMessage(LlmRole.USER, question)
         val request = LlmRequest(system = Prompts.libraryAskSystem(context, clock.now(), settings().outputLanguage, settings().glossary), messages = turns)
         val text = (if (onText == null) ai.chat().complete(request) else ai.chat().stream(request, onText)).trim()
-        val cited = citedSources(text, sources)
+        val cited = citedSources(text, sources, corpus())
         val shown = cited.ifEmpty { sources.take(3).map { AskSource(it.meeting.id, it.meeting.title, label = it.label) } }
         return AskMessage(Ids.new(), ChatRole.ASSISTANT, text, clock.now(), sources = shown)
     }
@@ -104,7 +107,7 @@ class LibraryAsk(
         private val CITATION = Regex("""M(\d+)(?:\s*[@,]?\s*(\d{1,2}(?::\d{2}){1,2}))?""")
 
         /** Sources for the [M2 12:34] style citations in [answer], in the order they first appear. */
-        fun citedSources(answer: String, sources: List<MeetingSearch.Source>): List<AskSource> {
+        fun citedSources(answer: String, sources: List<MeetingSearch.Source>, corpus: SearchCorpus): List<AskSource> {
             val byLabel = sources.associateBy { it.label }
             val out = LinkedHashMap<String, AskSource>()
             for (bracket in BRACKETS.findAll(answer)) {
@@ -112,10 +115,10 @@ class LibraryAsk(
                     val source = byLabel["M${match.groupValues[1]}"] ?: continue
                     val meeting = source.meeting
                     val ms = match.groupValues[2].takeIf { it.isNotEmpty() }?.let(::parseTime)
-                    val segment = ms?.let { t -> meeting.segments.lastOrNull { it.startMs <= t + 999 } ?: meeting.segments.firstOrNull() }
-                    val key = "${meeting.id}@${segment?.id}"
+                    val segment = ms?.let { t -> corpus.lineAt(meeting.id, t + 999) }
+                    val key = "${meeting.id}@${segment?.segmentId}"
                     if (key !in out) {
-                        out[key] = AskSource(meeting.id, meeting.title, ms ?: segment?.startMs, segment?.id, label = source.label)
+                        out[key] = AskSource(meeting.id, meeting.title, ms ?: segment?.startMs, segment?.segmentId, label = source.label)
                     }
                 }
             }

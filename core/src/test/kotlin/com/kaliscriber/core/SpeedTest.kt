@@ -44,10 +44,7 @@ import kotlin.test.assertTrue
 
 class SpeedTest {
     private val root: File = Files.createTempDirectory("speed").toFile()
-    private val repo = MeetingRepository(
-        JsonDocumentStore(File(root, "meetings"), Meeting.serializer(), persisted = MeetingRepository.PERSISTED) { it.id },
-        File(root, "audio"),
-    )
+    private val repo = MeetingRepository.inDir(root)
     private var settings = AppSettings()
 
     private val insightsJson = """{"title":"Sync","summary":"Done.","actionItems":[]}"""
@@ -195,7 +192,9 @@ class SpeedTest {
         repo.update(meeting.id) { it.copy(processingStep = "Working", processingProgress = 0.5f) }
         assertEquals(saved, file.readText(), "a progress change does not rewrite the file")
         assertEquals("Working", repo.get(meeting.id)!!.processingStep)
-        assertTrue(saved.contains("\"s\":400") && !saved.contains("startMs\":400"), saved)
+        val transcript = File(root, "transcripts/${meeting.id}.json").readText()
+        assertTrue(transcript.contains("\"s\":400") && !transcript.contains("startMs\":400"), transcript)
+        assertFalse(saved.contains("Hi there\"") && saved.contains("segments"), "the transcript is kept out of the meeting file")
         // Files written by older versions, with long keys, still load.
         val old = StoreJson.decodeFromString(WordTiming.serializer(), """{"startMs":5,"text":"x"}""")
         assertEquals(WordTiming(5, "x"), old)

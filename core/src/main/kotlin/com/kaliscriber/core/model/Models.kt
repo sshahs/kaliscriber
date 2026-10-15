@@ -45,19 +45,60 @@ data class Meeting(
     val calendarEvent: CalendarEvent? = null,
     /** Moments the user marked while recording, oldest first. */
     val bookmarks: List<Bookmark> = emptyList(),
+    /**
+     * A summary of [segments] kept with the meeting, so lists, People pages and search can use it
+     * while the transcript itself stays on disk (meeting lists leave [segments] empty).
+     */
+    val stats: TranscriptStats = TranscriptStats(),
     val updatedAt: Long = createdAt,
 ) {
     fun speaker(id: String?): Speaker? = speakers.firstOrNull { it.id == id }
     val plainTranscript: String get() = segments.joinToString(" ") { it.text }
 
+    /** True if the meeting has any transcript, whether or not it is loaded. */
+    val hasTranscript: Boolean get() = segments.isNotEmpty() || stats.lines > 0
+
     /** The start of the transcript, for list previews (cheap even for long meetings). */
-    fun transcriptPreview(maxChars: Int = 300): String = buildString {
-        for (seg in segments) {
-            if (length >= maxChars) break
-            if (isNotEmpty()) append(' ')
-            append(seg.text)
+    fun transcriptPreview(maxChars: Int = 300): String =
+        if (segments.isEmpty()) stats.preview.take(maxChars) else TranscriptStats.preview(segments, maxChars)
+
+    /** How long each speaker talked, by speaker id. */
+    fun speakingMs(): Map<String, Long> = if (segments.isEmpty()) stats.speakingMs else TranscriptStats.speakingMs(segments)
+}
+
+/** What lists need to know about a transcript without loading it. */
+@Serializable
+data class TranscriptStats(
+    val lines: Int = 0,
+    val preview: String = "",
+    /** Speaking time per speaker id. */
+    val speakingMs: Map<String, Long> = emptyMap(),
+    /** Changes whenever the transcript does, so a search index can tell it is out of date. */
+    val version: Long = 0,
+) {
+    companion object {
+        const val PREVIEW_CHARS = 300
+
+        fun of(segments: List<TranscriptSegment>, version: Long) =
+            TranscriptStats(segments.size, preview(segments, PREVIEW_CHARS), speakingMs(segments), version)
+
+        fun preview(segments: List<TranscriptSegment>, maxChars: Int): String = buildString {
+            for (seg in segments) {
+                if (length >= maxChars) break
+                if (isNotEmpty()) append(' ')
+                append(seg.text)
+            }
+        }.take(maxChars)
+
+        fun speakingMs(segments: List<TranscriptSegment>): Map<String, Long> {
+            val out = HashMap<String, Long>()
+            for (seg in segments) {
+                val id = seg.speakerId ?: continue
+                out[id] = (out[id] ?: 0L) + (seg.endMs - seg.startMs).coerceAtLeast(0)
+            }
+            return out
         }
-    }.take(maxChars)
+    }
 }
 
 /**

@@ -11,6 +11,7 @@ import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -19,23 +20,41 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * The user's meetings. Lists ([meetings], [all]) hold meetings without their transcripts, which
+ * stay on disk ([Meeting.stats] summarises them); [get], [observe] and [update] work with the
+ * whole meeting, transcript included.
+ */
 class MeetingRepository(
-    private val store: JsonDocumentStore<Meeting>,
+    private val store: MeetingStore,
     /** Root folder holding one audio folder per meeting. */
     private val audioRoot: File,
     private val clock: Clock = Clock.System,
 ) {
     val loaded = store.loaded
 
+    /** Every meeting, newest first, without transcripts (segments are empty). */
     val meetings: Flow<List<Meeting>> = store.items.map { items -> items.values.sortedByDescending { it.createdAt } }
+
+    /** Transcript changes and deletions, e.g. to keep a search index up to date. */
+    val changes: SharedFlow<MeetingStore.Change> = store.changes
 
     suspend fun load() = store.load()
 
+    /** The whole meeting, transcript included (read from disk if it is not cached). */
     fun get(id: String): Meeting? = store.get(id)
 
+    /** The whole meeting without keeping it cached, for one-off reads of many meetings. */
+    fun peek(id: String): Meeting? = store.peek(id)
+
+    /** The meeting without its transcript (cheap; nothing is read from disk). */
+    fun withoutTranscript(id: String): Meeting? = store.light(id)
+
+    /** Every meeting, newest first, without transcripts (segments are empty). */
     fun all(): List<Meeting> = store.items.value.values.sortedByDescending { it.createdAt }
 
-    fun observe(id: String): Flow<Meeting?> = store.items.map { it[id] }.distinctUntilChanged()
+    /** The whole meeting as it changes. */
+    fun observe(id: String): Flow<Meeting?> = store.observe(id)
 
     fun audioDir(id: String): File = File(audioRoot, id).apply { mkdirs() }
 
@@ -52,6 +71,7 @@ class MeetingRepository(
         return meeting
     }
 
+    /** Atomically transforms the whole meeting, transcript included. */
     suspend fun update(id: String, transform: (Meeting) -> Meeting): Meeting? =
         store.update(id) { current ->
             val next = transform(current)
@@ -176,6 +196,13 @@ class MeetingRepository(
     companion object {
         /** Processing progress lives in memory only, so progress updates don't rewrite the meeting file. */
         val PERSISTED: (Meeting) -> Meeting = { it.copy(processingStep = null, processingProgress = null) }
+
+        /** Meetings in [root]/meetings with transcripts in [root]/transcripts and audio in [audioRoot]. */
+        fun inDir(root: File, audioRoot: File = File(root, "audio"), clock: Clock = Clock.System) = MeetingRepository(
+            MeetingStore(File(root, "meetings"), File(root, "transcripts"), PERSISTED, clock),
+            audioRoot,
+            clock,
+        )
 
         fun defaultTitle(millis: Long): String =
             "Meeting " + SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(millis))

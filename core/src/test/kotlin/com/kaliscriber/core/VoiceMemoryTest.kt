@@ -26,7 +26,7 @@ import kotlin.test.assertTrue
 
 class VoiceMemoryTest {
     private val root: File = Files.createTempDirectory("voices").toFile()
-    private val repo = MeetingRepository(JsonDocumentStore(File(root, "meetings"), Meeting.serializer()) { it.id }, File(root, "audio"))
+    private val repo = MeetingRepository.inDir(root)
     private val library = VoiceLibrary(JsonValueStore(File(root, "voices.json"), ListSerializer(VoiceProfile.serializer()), emptyList()))
     private var settings = AppSettings(autoAnalyze = false, suggestSpeakerNames = false, llmSpeakerSeparation = false)
 

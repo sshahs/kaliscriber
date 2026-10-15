@@ -12,6 +12,8 @@ import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Speaker
 import com.kaliscriber.core.model.TranscriptSegment
 import com.kaliscriber.core.search.MeetingSearch
+import com.kaliscriber.core.search.MemoryCorpus
+import com.kaliscriber.core.search.TranscriptIndex
 import com.kaliscriber.core.store.JsonDocumentStore
 import com.kaliscriber.core.store.JsonValueStore
 import com.kaliscriber.core.store.MeetingRepository
@@ -70,7 +72,7 @@ class LibraryTest {
 
     @Test
     fun `asking across meetings cites the source moment and keeps the conversation`() = runTest {
-        val repo = MeetingRepository(JsonDocumentStore(File(root, "meetings"), Meeting.serializer()) { it.id }, File(root, "audio"))
+        val repo = MeetingRepository.inDir(root)
         repo.load()
         repo.create().let { } // an empty meeting is ignored
         listOf(launch, hiring).forEach { m -> repo.create(m.title).also { created -> repo.update(created.id) { m.copy(id = created.id) } } }
@@ -84,7 +86,10 @@ class LibraryTest {
             }
         }
         val history = JsonValueStore(File(root, "ask.json"), ListSerializer(AskMessage.serializer()), emptyList())
-        val ask = LibraryAsk(repo, history, FakeAi(llm, FakeStt(false) { SttResult(emptyList(), false) }), { AppSettings() })
+        // Passages come from the search index, as in the app.
+        val index = TranscriptIndex(JdbcSqlDb(File(root, "search.db")))
+        repo.all().forEach { index.reindex(repo.get(it.id)!!) }
+        val ask = LibraryAsk(repo, history, FakeAi(llm, FakeStt(false) { SttResult(emptyList(), false) }), { AppSettings() }, { index })
 
         val answer = ask.ask("What did we decide about price increases?")
         assertFalse(answer.isError)
@@ -101,7 +106,7 @@ class LibraryTest {
     @Test
     fun `citations map several meetings and ignore unknown labels`() {
         val sources = MeetingSearch.retrieve(listOf(launch, hiring), listOf("pricing", "hiring"), 10_000)
-        val cited = LibraryAsk.citedSources("Yes [M1 00:10, M2] and also [M9 01:00].", sources)
+        val cited = LibraryAsk.citedSources("Yes [M1 00:10, M2] and also [M9 01:00].", sources, MemoryCorpus(listOf(launch, hiring)))
         assertEquals(2, cited.size)
         assertEquals(setOf("m1", "m2"), cited.map { it.meetingId }.toSet())
     }

@@ -18,7 +18,7 @@ import kotlin.test.assertTrue
 
 class BookmarksTest {
     private val root: File = Files.createTempDirectory("marks").toFile()
-    private val repo = MeetingRepository(JsonDocumentStore(File(root, "m"), Meeting.serializer()) { it.id }, File(root, "a"))
+    private val repo = MeetingRepository.inDir(root)
 
     @Test
     fun `bookmarks are weighted in running notes and the summary`() = runTest {

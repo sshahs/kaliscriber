@@ -29,7 +29,7 @@ import kotlin.test.assertTrue
 
 class MeetingPipelineTest {
     private val root: File = Files.createTempDirectory("kali").toFile()
-    private val repo = MeetingRepository(JsonDocumentStore(File(root, "meetings"), Meeting.serializer()) { it.id }, File(root, "audio"))
+    private val repo = MeetingRepository.inDir(root)
     private var settings = AppSettings()
 
     private val insightsJson = """```json
@@ -410,7 +410,7 @@ class MeetingPipelineTest {
     fun `meetings persist across store instances`() = runTest {
         val meeting = repo.create("Standup")
         repo.update(meeting.id) { it.copy(durationMs = 42) }
-        val reopened = MeetingRepository(JsonDocumentStore(File(root, "meetings"), Meeting.serializer()) { it.id }, File(root, "audio"))
+        val reopened = MeetingRepository.inDir(root)
         reopened.load()
         assertEquals(42, reopened.get(meeting.id)!!.durationMs)
         assertEquals("Standup", reopened.get(meeting.id)!!.title)

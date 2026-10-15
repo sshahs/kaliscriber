@@ -22,16 +22,28 @@ object MeetingSearch {
         val segmentId: String? = null,
         val startMs: Long? = null,
         val score: Double = 0.0,
+        /** Position of the line in its meeting's transcript. */
+        val lineIndex: Int? = null,
     )
 
     data class Result(val meeting: Meeting, val score: Double, val hits: List<Hit>)
 
-    /** Meetings matching [query], best first, each with its best [maxHits] matches. */
-    fun search(meetings: List<Meeting>, query: String, maxHits: Int = 3): List<Result> {
+    /** Meetings matching [query], best first, each with its best [maxHits] matches. Meetings need their transcripts. */
+    fun search(meetings: List<Meeting>, query: String, maxHits: Int = 3): List<Result> =
+        search(meetings, MemoryCorpus(meetings), query, maxHits)
+
+    /**
+     * Meetings matching [query], best first, each with its best [maxHits] matches: their own fields
+     * (title, people, summary, action items) from [meetings], which may leave out transcripts, and
+     * transcript lines from [corpus].
+     */
+    fun search(meetings: List<Meeting>, corpus: SearchCorpus, query: String, maxHits: Int = 3): List<Result> {
         val terms = terms(query)
         if (terms.isEmpty()) return emptyList()
         val phrase = normalize(query).trim()
-        val stats = CorpusStats(meetings)
+        val stats = CorpusStats(meetings, corpus)
+        val byId = meetings.associateBy { it.id }
+        val lineHits = corpus.candidates(terms, MAX_CANDIDATES).filter { it.meetingId in byId }.groupBy { it.meetingId }
         return meetings.mapNotNull { meeting ->
             val hits = mutableListOf<Hit>()
             fun fieldHit(field: Field, text: String?, boost: Double) {
@@ -43,9 +55,9 @@ object MeetingSearch {
             fieldHit(Field.PEOPLE, meeting.speakers.filter { !it.isPlaceholder }.joinToString(", ") { it.name }, 2.0)
             fieldHit(Field.SUMMARY, meeting.insights?.summary, 1.5)
             meeting.insights?.actionItems?.forEach { fieldHit(Field.ACTION_ITEM, listOfNotNull(it.task, it.owner).joinToString(" — "), 1.5) }
-            for (seg in meeting.segments) {
-                val score = stats.score(terms, seg.text) + if (phrase.length > 2 && normalize(seg.text).contains(phrase)) 2.0 else 0.0
-                if (score > 0) hits += Hit(Field.TRANSCRIPT, snippet(seg.text, terms), seg.id, seg.startMs, score)
+            for (line in lineHits[meeting.id].orEmpty()) {
+                val score = stats.score(terms, line.text) + if (phrase.length > 2 && normalize(line.text).contains(phrase)) 2.0 else 0.0
+                if (score > 0) hits += Hit(Field.TRANSCRIPT, snippet(line.text, terms), line.segmentId, line.startMs, score, line.index)
             }
             if (hits.isEmpty()) return@mapNotNull null
             val ranked = hits.sortedByDescending { it.score }
@@ -58,16 +70,26 @@ object MeetingSearch {
     /** A labelled excerpt of one meeting for the AI, with its transcript passages. */
     data class Source(val label: String, val meeting: Meeting, val passages: List<List<TranscriptSegment>>)
 
+    /** [retrieve] over meetings held in memory with their transcripts. */
+    fun retrieve(meetings: List<Meeting>, keywords: List<String>, budgetChars: Int, maxMeetings: Int = 8): List<Source> =
+        retrieve(meetings, MemoryCorpus(meetings), keywords, budgetChars, maxMeetings)
+
     /**
      * Picks what the AI should read to answer a question across meetings: for the best matching
      * meetings, a header (date, summary, decisions, action items) and the transcript passages around
      * the matching lines, within [budgetChars]. When nothing matches (e.g. "what happened last
      * week?"), the most recent meetings' summaries are used instead.
      */
-    fun retrieve(meetings: List<Meeting>, keywords: List<String>, budgetChars: Int, maxMeetings: Int = 8): List<Source> {
+    fun retrieve(
+        meetings: List<Meeting>,
+        corpus: SearchCorpus,
+        keywords: List<String>,
+        budgetChars: Int,
+        maxMeetings: Int = 8,
+    ): List<Source> {
         val query = keywords.joinToString(" ")
         val terms = terms(query)
-        val ranked = if (terms.isEmpty()) emptyList() else search(meetings, query, maxHits = Int.MAX_VALUE)
+        val ranked = if (terms.isEmpty()) emptyList() else search(meetings, corpus, query, maxHits = Int.MAX_VALUE)
         val chosen = if (ranked.isEmpty()) {
             meetings.sortedByDescending { it.createdAt }.take(15).map { Result(it, 0.0, emptyList()) }
         } else {
@@ -79,22 +101,16 @@ object MeetingSearch {
             val meeting = result.meeting
             val label = "M${i + 1}"
             used += header(label, meeting).length
-            val passages = mutableListOf<List<TranscriptSegment>>()
-            val wanted = result.hits.filter { it.field == Field.TRANSCRIPT && it.segmentId != null }
-            val indexOf = meeting.segments.withIndex().associate { (idx, seg) -> seg.id to idx }
-            val taken = mutableSetOf<Int>()
-            for (hit in wanted) {
+            val taken = sortedMapOf<Int, TranscriptSegment>()
+            for (hit in result.hits) {
                 if (used >= budgetChars) break
-                val center = indexOf[hit.segmentId] ?: continue
-                val range = (center - 1).coerceAtLeast(0)..(center + 1).coerceAtMost(meeting.segments.lastIndex)
-                val fresh = range.filter { it !in taken }
+                val center = hit.lineIndex ?: continue
+                val fresh = corpus.lines(meeting.id, (center - 1).coerceAtLeast(0), center + 1).filter { it.index !in taken }
                 if (fresh.isEmpty()) continue
-                val segs = fresh.map { meeting.segments[it] }
-                used += segs.sumOf { it.text.length + 30 }
-                taken += fresh
-                passages += segs
+                used += fresh.sumOf { it.text.length + 30 }
+                fresh.forEach { taken[it.index] = it.toSegment() }
             }
-            sources += Source(label, meeting, mergeAdjacent(meeting, passages))
+            sources += Source(label, meeting, runs(taken))
             if (used >= budgetChars) return sources
         }
         return sources
@@ -125,17 +141,16 @@ object MeetingSearch {
         }
     }
 
-    private fun mergeAdjacent(meeting: Meeting, passages: List<List<TranscriptSegment>>): List<List<TranscriptSegment>> {
-        val order = meeting.segments.withIndex().associate { (i, s) -> s.id to i }
-        val indices = passages.flatten().mapNotNull { order[it.id] }.distinct().sorted()
-        val merged = mutableListOf<MutableList<TranscriptSegment>>()
+    /** Consecutive lines (by position) grouped into passages. */
+    private fun runs(lines: Map<Int, TranscriptSegment>): List<List<TranscriptSegment>> {
+        val out = mutableListOf<MutableList<TranscriptSegment>>()
         var last = -10
-        for (i in indices) {
-            if (i != last + 1 || merged.isEmpty()) merged += mutableListOf<TranscriptSegment>()
-            merged.last() += meeting.segments[i]
-            last = i
+        for ((index, seg) in lines) {
+            if (index != last + 1 || out.isEmpty()) out += mutableListOf<TranscriptSegment>()
+            out.last() += seg
+            last = index
         }
-        return merged
+        return out
     }
 
     /**
@@ -144,7 +159,15 @@ object MeetingSearch {
      */
     fun terms(text: String): List<String> = words(text).filter { it.length >= 2 && it !in STOP_WORDS }.map(::stem).distinct()
 
-    private fun words(text: String): List<String> = normalize(text).split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
+    private fun words(text: String): List<String> = normalize(text).split(NON_WORD).filter { it.isNotEmpty() }
+
+    /** The words of [text] as the search index stores them: lower case, without accents or punctuation. */
+    fun indexWords(text: String): List<String> = words(text)
+
+    private val NON_WORD = Regex("[^\\p{L}\\p{N}]+")
+
+    /** Most transcript lines considered per search; the newest meetings' lines come first. */
+    private const val MAX_CANDIDATES = 5_000
 
     /** A light English stemmer: drops common endings so word forms match. */
     private fun stem(word: String): String {
@@ -176,25 +199,21 @@ object MeetingSearch {
     }
 
     /** BM25 statistics over all transcript lines and meeting fields. */
-    private class CorpusStats(meetings: List<Meeting>) {
-        private val docFreq = HashMap<String, Int>()
+    private class CorpusStats(meetings: List<Meeting>, private val corpus: SearchCorpus) {
+        private val fields = meetings.flatMap { listOfNotNull(it.title, it.insights?.summary) }.map { doc -> words(doc).map(::stem) }
         private val size: Int
         private val avgLength: Double
+        private val docFreq = HashMap<String, Int>()
 
         init {
-            var count = 0
-            var totalLength = 0L
-            for (m in meetings) {
-                val docs = m.segments.map { it.text } + listOfNotNull(m.title, m.insights?.summary)
-                for (doc in docs) {
-                    val stems = words(doc).map(::stem)
-                    count++
-                    totalLength += stems.size
-                    stems.toSet().forEach { docFreq[it] = (docFreq[it] ?: 0) + 1 }
-                }
-            }
-            size = count
-            avgLength = if (count == 0) 1.0 else totalLength.toDouble() / count
+            val (lines, averageWords) = corpus.size()
+            size = lines + fields.size
+            val fieldWords = fields.sumOf { it.size }
+            avgLength = if (size == 0) 1.0 else (lines * averageWords + fieldWords) / size
+        }
+
+        private fun df(term: String): Int = docFreq.getOrPut(term) {
+            corpus.lineFrequency(term) + fields.count { term in it }
         }
 
         fun score(queryTerms: List<String>, text: String): Double {
@@ -205,7 +224,7 @@ object MeetingSearch {
             for (term in queryTerms) {
                 val tf = counts[term] ?: 0
                 if (tf == 0) continue
-                val df = (docFreq[term] ?: 0).coerceAtLeast(1)
+                val df = df(term).coerceAtLeast(1)
                 val idf = ln(1 + (size - df + 0.5) / (df + 0.5))
                 score += idf * (tf * (K1 + 1)) / (tf + K1 * (1 - B + B * stems.size / avgLength))
             }

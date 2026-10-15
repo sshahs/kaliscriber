@@ -49,7 +49,7 @@ object People {
         for (meeting in meetings) {
             for (speaker in meeting.speakers.filter { !it.isPlaceholder }) {
                 val name = resolve(speaker.name) ?: continue
-                val ms = meeting.segments.filter { it.speakerId == speaker.id }.sumOf { it.endMs - it.startMs }
+                val ms = meeting.speakingMs()[speaker.id] ?: 0L
                 appear(name, meeting, ms)
             }
             val insights = meeting.insights ?: continue

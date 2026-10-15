@@ -31,18 +31,18 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     val query = MutableStateFlow("")
 
     val meetings: StateFlow<List<Meeting>> = combine(container.meetings.meetings, query) { list, q ->
+        // Transcripts are searched through the index (see searchResults).
         if (q.isBlank()) list else list.filter { m ->
             m.title.contains(q, true) ||
                 m.insights?.summary?.contains(q, true) == true ||
-                m.speakers.any { it.name.contains(q, true) } ||
-                m.segments.any { it.text.contains(q, true) }
+                m.speakers.any { it.name.contains(q, true) }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Meetings matching the search box, with the lines that matched; empty when it is blank. */
     @OptIn(FlowPreview::class)
     val searchResults: StateFlow<List<MeetingSearch.Result>> = combine(container.meetings.meetings, query.debounce(200)) { list, q ->
-        if (q.isBlank()) emptyList() else withContext(Dispatchers.Default) { MeetingSearch.search(list, q) }
+        if (q.isBlank()) emptyList() else withContext(Dispatchers.IO) { MeetingSearch.search(list, container.searchIndex, q) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val notes: StateFlow<List<Note>> = combine(container.notes.notes, query) { list, q ->

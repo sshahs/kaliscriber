@@ -32,10 +32,7 @@ import kotlin.test.assertTrue
 
 class LiveSpeakersTest {
     private val root: File = Files.createTempDirectory("live").toFile()
-    private val repo = MeetingRepository(
-        JsonDocumentStore(File(root, "meetings"), Meeting.serializer(), persisted = MeetingRepository.PERSISTED) { it.id },
-        File(root, "audio"),
-    )
+    private val repo = MeetingRepository.inDir(root)
     private val library = VoiceLibrary(JsonValueStore(File(root, "voices.json"), ListSerializer(VoiceProfile.serializer()), emptyList()))
     private val alice = floatArrayOf(1f, 0f, 0f)
     private val bob = floatArrayOf(0f, 1f, 0f)

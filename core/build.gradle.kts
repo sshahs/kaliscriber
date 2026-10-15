@@ -26,4 +26,6 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
+    // The search index's SQL, run against real SQLite on the JVM.
+    testImplementation(libs.sqlite.jdbc)
 }

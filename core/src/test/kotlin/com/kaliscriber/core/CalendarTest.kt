@@ -130,7 +130,7 @@ class CalendarTest {
     @Test
     fun `prep gathers the invitees' open tasks and the last meeting`() = runTest {
         val root = Files.createTempDirectory("cal").toFile()
-        val repo = MeetingRepository(JsonDocumentStore(File(root, "m"), Meeting.serializer()) { it.id }, File(root, "a"))
+        val repo = MeetingRepository.inDir(root)
         val last = repo.create("Weekly sync, pricing")
         repo.update(last.id) {
             it.copy(
@@ -151,7 +151,7 @@ class CalendarTest {
     @Test
     fun `a recording takes its title and invitees from the calendar`() = runTest {
         val root = Files.createTempDirectory("cal2").toFile()
-        val repo = MeetingRepository(JsonDocumentStore(File(root, "m"), Meeting.serializer()) { it.id }, File(root, "a"))
+        val repo = MeetingRepository.inDir(root)
         var settings = AppSettings()
         val llm = FakeLlm { """{"title":"Something else","summary":"Done.","actionItems":[]}""" }
         val stt = FakeStt(false) { SttResult(emptyList(), false) }
