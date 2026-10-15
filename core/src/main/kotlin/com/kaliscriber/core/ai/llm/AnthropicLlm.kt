@@ -8,6 +8,9 @@ import com.kaliscriber.core.ai.headers
 import com.kaliscriber.core.ai.streamError
 import com.kaliscriber.core.ai.streamEvents
 import com.kaliscriber.core.ai.toBody
+import com.kaliscriber.core.ai.usage.TokenUsage
+import com.kaliscriber.core.ai.usage.UsageParsing
+import com.kaliscriber.core.ai.usage.reportUsage
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -28,6 +31,7 @@ class AnthropicLlm(
 
     override suspend fun complete(request: LlmRequest): String {
         val json = http.executeForJson(baseRequest("/v1/messages").post(body(request, stream = false).toBody()).build(), config.id)
+        reportUsage(UsageParsing.anthropic(json["usage"]))
         val text = json["content"]?.jsonArray.orEmpty()
             .filterIsInstance<JsonObject>()
             .filter { it["type"]?.jsonPrimitive?.contentOrNull == "text" }
@@ -38,10 +42,18 @@ class AnthropicLlm(
 
     override suspend fun stream(request: LlmRequest, onText: (String) -> Unit): String {
         val text = StringBuilder()
+        var usage: TokenUsage? = null
         val req = baseRequest("/v1/messages").post(body(request, stream = true).toBody()).build()
         http.streamEvents(req, config.id) { data ->
             val obj = runCatching { AiJson.parseToJsonElement(data).jsonObject }.getOrNull() ?: return@streamEvents
             streamError(obj)?.let { throw AiException("${config.id.displayName} error: $it") }
+            when (obj["type"]?.jsonPrimitive?.contentOrNull) {
+                // The input counts come first, the output count at the end.
+                "message_start" -> usage = UsageParsing.anthropic((obj["message"] as? JsonObject)?.get("usage"))
+                "message_delta" -> UsageParsing.anthropic(obj["usage"])?.let { end ->
+                    usage = (usage ?: TokenUsage(0, 0)).copy(output = end.output)
+                }
+            }
             if (obj["type"]?.jsonPrimitive?.contentOrNull != "content_block_delta") return@streamEvents
             val delta = obj["delta"]?.jsonObject ?: return@streamEvents
             if (delta["type"]?.jsonPrimitive?.contentOrNull != "text_delta") return@streamEvents
@@ -52,6 +64,7 @@ class AnthropicLlm(
             }
         }
         if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
+        reportUsage(usage)
         return text.toString()
     }
 

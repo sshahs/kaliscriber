@@ -1,8 +1,11 @@
 package com.kaliscriber.core.ai
 
+import com.kaliscriber.core.ai.llm.LlmClient
 import com.kaliscriber.core.ai.llm.LlmMessage
 import com.kaliscriber.core.ai.llm.LlmRequest
 import com.kaliscriber.core.ai.llm.LlmRole
+import com.kaliscriber.core.ai.usage.TaggedLlm
+import com.kaliscriber.core.ai.usage.UsageTag
 import com.kaliscriber.core.model.ActionItem
 import com.kaliscriber.core.model.ChatMessage
 import com.kaliscriber.core.model.ChatRole
@@ -61,8 +64,19 @@ class MeetingAi(
     private fun transcriptFor(meeting: Meeting): String =
         TranscriptFormatter.truncateMiddle(TranscriptFormatter.forPrompt(meeting), settings().maxTranscriptChars)
 
-    private suspend fun json(system: String, user: String, outputLimit: Int? = null): JsonObject {
-        val text = ai.chat().complete(
+    /** The chat model, with its requests counted towards [meeting] (or none) as [purpose]. */
+    private fun chat(meeting: Meeting?, purpose: String): LlmClient = TaggedLlm(ai.chat(), UsageTag(meeting?.id, purpose))
+
+    private fun purposeOf(task: String): String = when {
+        task.startsWith(Prompts.TASK_INSIGHTS) -> "Summary"
+        task.startsWith(Prompts.TASK_GAPS) -> "Gaps & questions"
+        task.startsWith(Prompts.TASK_NAMES) -> "Speaker names"
+        task.startsWith(Prompts.TASK_GLOSSARY) -> "Glossary fixes"
+        else -> "Meeting"
+    }
+
+    private suspend fun json(system: String, user: String, outputLimit: Int? = null, meeting: Meeting? = null, purpose: String = "Other"): JsonObject {
+        val text = chat(meeting, purpose).complete(
             LlmRequest(system = system, messages = listOf(LlmMessage(LlmRole.USER, user)), jsonMode = true, outputLimit = outputLimit),
         )
         return LlmJson.parseObject(text)
@@ -75,7 +89,7 @@ class MeetingAi(
     /** Runs [task] on [meeting] and parses the JSON reply; the meeting text forms a cacheable prefix. */
     private suspend fun meetingJson(meeting: Meeting, task: String, transcript: String = transcriptFor(meeting)): JsonObject {
         val prefix = shared(meeting, transcript)
-        val text = ai.chat().complete(
+        val text = chat(meeting, purposeOf(task)).complete(
             LlmRequest(
                 system = prefix + "\n" + task,
                 messages = listOf(LlmMessage(LlmRole.USER, "Do the task now and reply with the JSON only.")),
@@ -129,7 +143,7 @@ class MeetingAi(
                 appendLine("</bookmarks>")
             }
         }
-        return ai.chat().complete(
+        return chat(meeting, "Running notes").complete(
             LlmRequest(
                 system = Prompts.sectionNotesSystem(settings().outputLanguage, settings().glossary),
                 messages = listOf(LlmMessage(LlmRole.USER, user)),
@@ -218,14 +232,15 @@ class MeetingAi(
         var system = prefix + "\n" + Prompts.ANSWER_TASK
         if (spoken) system += "\n" + Prompts.SPOKEN_ANSWER_RULE
         val request = LlmRequest(system = system, messages = messages, cachePrefix = prefix)
-        return (if (onText == null) ai.chat().complete(request) else ai.chat().stream(request, onText)).trim()
+        val chat = chat(meeting, "Ask")
+        return (if (onText == null) chat.complete(request) else chat.stream(request, onText)).trim()
     }
 
     /** A natural, speakable recap of the meeting for an audio briefing. */
     suspend fun briefingScript(meeting: Meeting): String {
         requireTranscript(meeting)
         val prefix = shared(meeting)
-        return ai.chat().complete(
+        return chat(meeting, "Audio briefing").complete(
             LlmRequest(
                 system = prefix + "\n" + Prompts.BRIEFING_TASK,
                 messages = listOf(LlmMessage(LlmRole.USER, "Write the briefing now.")),
@@ -308,7 +323,7 @@ class MeetingAi(
             var obj: JsonObject? = null
             for (attempt in 1..2) {
                 try {
-                    obj = withTimeoutOrNull(partTimeoutMs) { json(Prompts.SEPARATE_SPEAKERS_SYSTEM, user, outputLimit) }
+                    obj = withTimeoutOrNull(partTimeoutMs) { json(Prompts.SEPARATE_SPEAKERS_SYSTEM, user, outputLimit, meeting, "Speaker separation") }
                     if (obj != null) break
                     // A part that timed out is not retried: it would most likely time out again.
                     lastError = "the AI took longer than ${partTimeoutMs / 60_000} minutes"
@@ -414,7 +429,7 @@ class MeetingAi(
 
     suspend fun noteInstruction(note: Note, instruction: String): String {
         if (note.content.isBlank()) throw AiException("The note is empty.")
-        return ai.chat().complete(
+        return chat(null, "Notes").complete(
             LlmRequest(
                 system = Prompts.noteSystem(settings().outputLanguage),
                 messages = listOf(

@@ -3,30 +3,35 @@ package com.kaliscriber.app.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
+import com.kaliscriber.app.data.ExportSecret
+import com.kaliscriber.app.export.ExportTarget
+import com.kaliscriber.app.export.exportMessage
+import com.kaliscriber.app.speech.LocalModel
+import com.kaliscriber.app.speech.ModelRole
+import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.core.ai.AiException
 import com.kaliscriber.core.ai.AppSettings
+import com.kaliscriber.core.ai.ExportSettings
 import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.ai.ProviderSettings
 import com.kaliscriber.core.ai.llm.LlmClients
 import com.kaliscriber.core.ai.llm.LlmMessage
 import com.kaliscriber.core.ai.llm.LlmRequest
 import com.kaliscriber.core.ai.llm.LlmRole
-import com.kaliscriber.app.data.ExportSecret
-import com.kaliscriber.app.export.ExportTarget
-import com.kaliscriber.app.export.exportMessage
-import com.kaliscriber.app.speech.LocalModel
-import com.kaliscriber.core.ai.ExportSettings
-import com.kaliscriber.core.speakers.VoiceProfile
-import com.kaliscriber.app.speech.ModelRole
-import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.core.ai.stt.SttClients
 import com.kaliscriber.core.ai.tts.ElevenLabsTts
 import com.kaliscriber.core.ai.tts.Voice
+import com.kaliscriber.core.ai.usage.ModelPrice
+import com.kaliscriber.core.ai.usage.UsageLedger
 import com.kaliscriber.core.audio.Wav
+import com.kaliscriber.core.speakers.VoiceProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -96,6 +101,20 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun cancelModel(model: LocalModel) = container.models.cancel(model)
 
     fun searchModelError(): String? = container.searchModelError
+
+    /** AI usage this month, by model. */
+    val usageThisMonth: StateFlow<List<UsageLedger.ModelTotal>> = container.usage.records
+        .map { UsageLedger.byModel(UsageLedger.thisMonth(it, System.currentTimeMillis())) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun monthCost(prices: Map<String, ModelPrice>): Double? =
+        UsageLedger.cost(UsageLedger.thisMonth(container.usage.records.value, System.currentTimeMillis()), prices)
+
+    fun setPrice(key: String, price: ModelPrice?) = update { s ->
+        s.copy(modelPrices = if (price == null) s.modelPrices - key else s.modelPrices + (key to price))
+    }
+
+    fun clearUsage() = viewModelScope.launch { container.usage.clear() }
 
     fun deleteModel(model: LocalModel) {
         viewModelScope.launch {

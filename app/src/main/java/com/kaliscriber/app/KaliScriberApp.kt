@@ -27,6 +27,8 @@ import com.kaliscriber.core.ai.DefaultAiServices
 import com.kaliscriber.core.ai.MeetingAi
 import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.ai.defaultHttpClient
+import com.kaliscriber.core.ai.usage.UsageLedger
+import com.kaliscriber.core.ai.usage.UsageRecord
 import com.kaliscriber.core.ask.LibraryAsk
 import com.kaliscriber.core.model.AskMessage
 import com.kaliscriber.core.model.AudioChunk
@@ -95,7 +97,9 @@ class AppContainer(context: Context) {
     val models = ModelManager(appContext, http, scope)
     val localSpeech = LocalSpeechEngine(models, settings)
 
-    val ai = DefaultAiServices(settings, secrets, http, localStt = { localSpeech })
+    /** Token usage of every AI request, kept on the phone to show what meetings cost. */
+    val usage = UsageLedger(JsonValueStore(File(filesDir, "usage.json"), ListSerializer(UsageRecord.serializer()), emptyList()))
+    val ai = DefaultAiServices(settings, secrets, http, localStt = { localSpeech }, usage = usage)
     val meetingAi = MeetingAi(ai, settings)
     val speech = SpeechOutput(appContext, ai, settings)
 

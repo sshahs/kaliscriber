@@ -5,6 +5,8 @@ import com.kaliscriber.core.ai.llm.LlmClients
 import com.kaliscriber.core.ai.stt.SttClient
 import com.kaliscriber.core.ai.stt.SttClients
 import com.kaliscriber.core.ai.tts.ElevenLabsTts
+import com.kaliscriber.core.ai.usage.MeteredLlm
+import com.kaliscriber.core.ai.usage.UsageLedger
 import okhttp3.OkHttpClient
 
 /** Builds clients for the providers currently selected in [AppSettings]. */
@@ -19,9 +21,11 @@ class DefaultAiServices(
     private val http: OkHttpClient = defaultHttpClient(),
     /** The app's on-device speech engine, used when [ProviderId.LOCAL] is selected. */
     private val localStt: (() -> SttClient)? = null,
+    /** Where the token usage of chat requests is recorded, if anywhere. */
+    private val usage: UsageLedger? = null,
 ) : AiServices {
 
-    override fun chat(): LlmClient = chatFor(settings().chatProvider)
+    override fun chat(): LlmClient = chatFor(settings().chatProvider).let { if (usage != null) MeteredLlm(it, usage) else it }
 
     override fun stt(): SttClient = sttFor(settings().sttProvider)
 

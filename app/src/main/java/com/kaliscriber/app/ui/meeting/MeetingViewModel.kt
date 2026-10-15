@@ -1,18 +1,20 @@
 package com.kaliscriber.app.ui.meeting
 
+import android.content.Intent
 import android.media.MediaPlayer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
-import android.content.Intent
 import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.export.exportMessage
 import com.kaliscriber.app.speech.VoiceRecorder
+import com.kaliscriber.core.ai.usage.UsageLedger
+import com.kaliscriber.core.ai.usage.UsageRecord
 import com.kaliscriber.core.export.ExportResult
-import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
+import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -53,6 +56,13 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
 
     /** The excerpt the next question in "Ask AI" is about. */
     val excerpt = MutableStateFlow<ExcerptRef?>(null)
+
+    /** Token usage of this meeting's AI requests. */
+    val usage: StateFlow<List<UsageRecord>> = container.usage.records
+        .map { UsageLedger.forMeeting(it, meetingId) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun usageCost(records: List<UsageRecord>): Double? = UsageLedger.cost(records, container.settings().modelPrices)
 
     /** The answer the AI has written so far, while it is still writing it. */
     private val _answering = MutableStateFlow<String?>(null)

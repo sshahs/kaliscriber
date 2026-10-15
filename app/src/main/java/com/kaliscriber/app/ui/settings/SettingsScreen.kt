@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -85,6 +86,9 @@ import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.ai.TtsEngine
 import com.kaliscriber.core.ai.stt.SttClients
+import com.kaliscriber.core.ai.usage.ModelPrice
+import com.kaliscriber.core.ai.usage.TokenUsage
+import com.kaliscriber.core.ai.usage.UsageLedger
 import kotlin.math.roundToInt
 
 @Composable
@@ -115,6 +119,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             item { LocalSpeechSection(settings, modelStates, vm) }
             item { VoiceMemorySection(settings, modelStates, vm) }
             item { SmartSearchSection(modelStates, vm) }
+            item { UsageSection(settings, vm) }
             item { ReminderSection(settings, vm) }
             item { GlossarySection(settings, vm) }
             item {
@@ -323,6 +328,85 @@ private fun VoiceMemorySection(settings: AppSettings, states: Map<String, ModelS
                 IconButton(onClick = { vm.deleteVoice(voice.id) }) { Icon(Icons.Filled.Delete, contentDescription = "Forget ${voice.name}") }
             }
         }
+    }
+}
+
+/** Token counts like "12.3k" or "1.2M". */
+private fun tokens(n: Long): String = when {
+    n >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", n / 1_000_000.0)
+    n >= 1_000 -> String.format(java.util.Locale.US, "%.1fk", n / 1_000.0)
+    else -> n.toString()
+}
+
+private fun dollars(amount: Double): String =
+    if (amount < 0.01) "under $0.01" else String.format(java.util.Locale.US, "$%.2f", amount)
+
+@Composable
+private fun UsageSection(settings: AppSettings, vm: SettingsViewModel) {
+    val models by vm.usageThisMonth.collectAsStateWithLifecycle()
+    var pricing by remember { mutableStateOf<UsageLedger.ModelTotal?>(null) }
+    SectionCard("AI usage & cost") {
+        if (models.isEmpty()) {
+            Text("No AI requests this month yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            val total = models.map { it.usage }.reduce(TokenUsage::plus)
+            Text(
+                "This month: ${models.sumOf { it.requests }} requests, ${tokens(total.input)} tokens in " +
+                    "(${tokens(total.cachedInput)} from cache), ${tokens(total.output)} out" +
+                    (vm.monthCost(settings.modelPrices)?.let { " · about ${dollars(it)}" } ?: ""),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            models.forEach { m ->
+                val price = settings.modelPrices[m.key]
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(m.model.ifBlank { m.provider }, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "${m.requests} requests · ${tokens(m.usage.input)} in · ${tokens(m.usage.output)} out" +
+                                (price?.let { " · ${dollars(it.cost(m.usage))}" } ?: "") +
+                                if (m.usage.estimated) " · partly estimated" else "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = { pricing = m }) { Text(if (price == null) "Set price" else "Price") }
+                }
+            }
+            TextButton(onClick = vm::clearUsage) { Text("Clear usage history") }
+        }
+        Text(
+            "Token counts come from your provider; when it doesn't report them they are estimated. Enter each model's price " +
+                "from your provider's pricing page to see costs.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    pricing?.let { m ->
+        val current = settings.modelPrices[m.key]
+        var input by remember(m.key) { mutableStateOf(current?.input?.toString().orEmpty()) }
+        var cached by remember(m.key) { mutableStateOf(current?.cachedInput?.toString().orEmpty()) }
+        var output by remember(m.key) { mutableStateOf(current?.output?.toString().orEmpty()) }
+        AlertDialog(
+            onDismissRequest = { pricing = null },
+            title = { Text("Price of ${m.model}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("US dollars per million tokens.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(input, { input = it }, label = { Text("Input") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    OutlinedTextField(cached, { cached = it }, label = { Text("Cached input (optional)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    OutlinedTextField(output, { output = it }, label = { Text("Output") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val i = input.replace(',', '.').toDoubleOrNull()
+                    val o = output.replace(',', '.').toDoubleOrNull()
+                    vm.setPrice(m.key, if (i == null && o == null) null else ModelPrice(i ?: 0.0, o ?: 0.0, cached.replace(',', '.').toDoubleOrNull()))
+                    pricing = null
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { pricing = null }) { Text("Cancel") } },
+        )
     }
 }
 

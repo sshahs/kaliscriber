@@ -76,6 +76,8 @@ import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.export.GoogleAuth
 import com.kaliscriber.app.ui.common.shareText
+import com.kaliscriber.core.ai.usage.TokenUsage
+import com.kaliscriber.core.ai.usage.UsageRecord
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.transcript.TranscriptFormatter
@@ -254,7 +256,10 @@ fun MeetingScreen(
         AlertDialog(
             onDismissRequest = { showTimeline = false },
             title = { Text("Processing details") },
-            text = { TimelineList(m) },
+            text = {
+                val usage by vm.usage.collectAsStateWithLifecycle()
+                TimelineList(m, usage, vm.usageCost(usage))
+            },
             confirmButton = { TextButton(onClick = { showTimeline = false }) { Text("Close") } },
         )
     }
@@ -402,9 +407,9 @@ private fun PlayerBar(player: AudioPlayer) {
 
 /** Each processing step with its duration, and how long the meeting took to be ready after stopping. */
 @Composable
-private fun TimelineList(meeting: Meeting) {
+private fun TimelineList(meeting: Meeting, usage: List<UsageRecord>, cost: Double?) {
     val entries = meeting.timeline
-    if (entries.isEmpty()) {
+    if (entries.isEmpty() && usage.isEmpty()) {
         Text("Nothing recorded yet. Steps appear here as the meeting is processed.")
         return
     }
@@ -418,6 +423,23 @@ private fun TimelineList(meeting: Meeting) {
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+        }
+        if (usage.isNotEmpty()) {
+            val total = usage.map { it.usage }.reduce(TokenUsage::plus)
+            Text(
+                "AI: ${usage.size} requests, ${total.input} tokens in (${total.cachedInput} from cache), ${total.output} out" +
+                    (cost?.let { String.format(java.util.Locale.US, " · about $%.3f", it) } ?: "") +
+                    if (total.estimated) " (partly estimated)" else "",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            usage.groupBy { it.purpose.ifBlank { "Other" } }.forEach { (purpose, list) ->
+                val u = list.map { it.usage }.reduce(TokenUsage::plus)
+                Text(
+                    "  $purpose: ${list.size} × · ${u.input} in · ${u.output} out",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         entries.forEach { e ->
             Row(verticalAlignment = Alignment.Top) {

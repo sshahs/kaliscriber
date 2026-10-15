@@ -182,6 +182,8 @@ data class AppSettings(
     /** Rough cap on transcript characters sent to the LLM in one request. */
     val maxTranscriptChars: Int = 400_000,
     val export: ExportSettings = ExportSettings(),
+    /** Prices the user entered, per "provider/model", to estimate what AI requests cost. */
+    val modelPrices: Map<String, com.kaliscriber.core.ai.usage.ModelPrice> = emptyMap(),
     /**
      * Names and terms the AI should spell correctly, one per line (e.g. "Priya Sharma — product lead").
      * Added to every meeting request and used to fix misheard words in transcripts.

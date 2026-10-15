@@ -10,6 +10,9 @@ import com.kaliscriber.core.ai.headers
 import com.kaliscriber.core.ai.streamError
 import com.kaliscriber.core.ai.streamEvents
 import com.kaliscriber.core.ai.toBody
+import com.kaliscriber.core.ai.usage.TokenUsage
+import com.kaliscriber.core.ai.usage.UsageParsing
+import com.kaliscriber.core.ai.usage.reportUsage
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -32,14 +35,18 @@ class OpenAiCompatibleLlm(
 ) : LlmClient {
 
     override suspend fun complete(request: LlmRequest): String = withEffortFallback { effort ->
-        textOf(http.executeForJson(httpRequest(request, effort, stream = false), config.id))
+        val json = http.executeForJson(httpRequest(request, effort, stream = false), config.id)
+        reportUsage(UsageParsing.openAi(json))
+        textOf(json)
     }
 
     override suspend fun stream(request: LlmRequest, onText: (String) -> Unit): String = withEffortFallback { effort ->
         val text = StringBuilder()
+        var usage: TokenUsage? = null
         val rest = http.streamEvents(httpRequest(request, effort, stream = true), config.id) { data ->
             val obj = runCatching { AiJson.parseToJsonElement(data).jsonObject }.getOrNull() ?: return@streamEvents
             streamError(obj)?.let { throw AiException("${config.id.displayName} error: $it") }
+            UsageParsing.openAi(obj)?.let { usage = it }
             val delta = obj["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("delta")?.jsonObject
             val piece = delta?.get("content")?.let(::contentText).orEmpty()
             if (piece.isNotEmpty()) {
@@ -51,9 +58,11 @@ class OpenAiCompatibleLlm(
             // The provider sent an ordinary reply instead of a stream.
             val json = runCatching { AiJson.parseToJsonElement(rest).jsonObject }.getOrNull()
                 ?: throw AiException("${config.id.displayName} returned an unexpected response: ${rest.take(200)}")
+            reportUsage(UsageParsing.openAi(json))
             textOf(json).also(onText)
         } else {
             if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
+            reportUsage(usage)
             text.toString()
         }
     }

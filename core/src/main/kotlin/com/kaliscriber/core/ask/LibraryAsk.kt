@@ -9,6 +9,8 @@ import com.kaliscriber.core.ai.llm.LlmMessage
 import com.kaliscriber.core.ai.llm.LlmRequest
 import com.kaliscriber.core.ai.llm.LlmRole
 import com.kaliscriber.core.ai.strings
+import com.kaliscriber.core.ai.usage.TaggedLlm
+import com.kaliscriber.core.ai.usage.UsageTag
 import com.kaliscriber.core.model.AskMessage
 import com.kaliscriber.core.model.AskSource
 import com.kaliscriber.core.model.ChatRole
@@ -20,8 +22,8 @@ import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
 
 /**
  * "Ask across all meetings": finds the meetings and passages relevant to a question with
@@ -84,7 +86,8 @@ class LibraryAsk(
             LlmMessage(if (it.role == ChatRole.USER) LlmRole.USER else LlmRole.ASSISTANT, it.content)
         } + LlmMessage(LlmRole.USER, question)
         val request = LlmRequest(system = Prompts.libraryAskSystem(context, clock.now(), settings().outputLanguage, settings().glossary), messages = turns)
-        val text = (if (onText == null) ai.chat().complete(request) else ai.chat().stream(request, onText)).trim()
+        val chat = TaggedLlm(ai.chat(), UsageTag(null, "Ask all meetings"))
+        val text = (if (onText == null) chat.complete(request) else chat.stream(request, onText)).trim()
         val cited = citedSources(text, sources, corpus())
         val shown = cited.ifEmpty { sources.take(3).map { AskSource(it.meeting.id, it.meeting.title, label = it.label) } }
         return AskMessage(Ids.new(), ChatRole.ASSISTANT, text, clock.now(), sources = shown)
@@ -92,7 +95,7 @@ class LibraryAsk(
 
     /** Search words and likely synonyms for [question] from the AI; just the question's own words if that fails. */
     private suspend fun expandKeywords(question: String): List<String> = try {
-        val reply = ai.chat().complete(
+        val reply = TaggedLlm(ai.chat(), UsageTag(null, "Ask all meetings")).complete(
             LlmRequest(
                 system = Prompts.SEARCH_KEYWORDS_SYSTEM,
                 messages = listOf(LlmMessage(LlmRole.USER, question)),

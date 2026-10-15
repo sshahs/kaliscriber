@@ -7,6 +7,9 @@ import com.kaliscriber.core.ai.bearer
 import com.kaliscriber.core.ai.executeForJson
 import com.kaliscriber.core.ai.streamError
 import com.kaliscriber.core.ai.streamLines
+import com.kaliscriber.core.ai.usage.TokenUsage
+import com.kaliscriber.core.ai.usage.UsageParsing
+import com.kaliscriber.core.ai.usage.reportUsage
 import com.kaliscriber.core.ai.toBody
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -31,6 +34,7 @@ class OllamaLlm(
 
     override suspend fun complete(request: LlmRequest): String {
         val json = http.executeForJson(httpRequest(request, stream = false), config.id)
+        reportUsage(UsageParsing.ollama(json))
         val text = json["message"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull.orEmpty()
         if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
         return text
@@ -39,10 +43,12 @@ class OllamaLlm(
     /** Ollama streams one JSON object per line. */
     override suspend fun stream(request: LlmRequest, onText: (String) -> Unit): String {
         val text = StringBuilder()
+        var usage: TokenUsage? = null
         http.streamLines(httpRequest(request, stream = true), config.id) { line ->
             if (line.isBlank()) return@streamLines
             val obj = runCatching { AiJson.parseToJsonElement(line).jsonObject }.getOrNull() ?: return@streamLines
             streamError(obj)?.let { throw AiException("${config.id.displayName} error: $it") }
+            UsageParsing.ollama(obj)?.let { usage = it }
             val piece = obj["message"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull.orEmpty()
             if (piece.isNotEmpty()) {
                 text.append(piece)
@@ -50,6 +56,7 @@ class OllamaLlm(
             }
         }
         if (text.isBlank()) throw AiException("${config.id.displayName} returned an empty answer")
+        reportUsage(usage)
         return text.toString()
     }
 
