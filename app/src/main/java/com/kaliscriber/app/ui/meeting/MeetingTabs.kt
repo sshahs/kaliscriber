@@ -12,6 +12,22 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.FilterChip
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.vector.ImageVector
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -166,6 +182,9 @@ private val Meeting.isProcessing get() = status == MeetingStatus.TRANSCRIBING ||
 // Summary
 // ---------------------------------------------------------------------------------------------
 
+/** A part of the summary, with what its jump chip says (null for none). */
+private class SummaryPart(val key: String, val chip: String?, val content: @Composable () -> Unit)
+
 @Composable
 fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTranscriptAt: (Long) -> Unit) {
     val insights = meeting.insights
@@ -185,18 +204,14 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
         }
         return
     }
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { ListenRow(meeting, busy, vm) }
-        item { FormatRow(meeting, enabled = Busy.INSIGHTS !in busy, onPick = vm::setMeetingType) }
-        if (Busy.INSIGHTS in busy) item { Text("Regenerating…", style = MaterialTheme.typography.bodySmall) }
+    // What needs doing first, then what was decided and said; background last and folded.
+    val parts = buildList {
         if (insights.summary.isNotBlank()) {
-            item { SectionCard("Summary", Icons.Filled.Subject) { MarkdownText(insights.summary) } }
-        }
-        insights.sections.forEach { section ->
-            item { SectionCard(section.title, Icons.Filled.ViewAgenda) { BulletList(section.items) } }
+            add(SummaryPart("summary", null) { SectionCard("Summary", Icons.Filled.Subject) { MarkdownText(insights.summary) } })
         }
         if (insights.actionItems.isNotEmpty()) {
-            item {
+            val open = insights.actionItems.count { !it.done }
+            add(SummaryPart("actions", "Actions ${if (open > 0) open else insights.actionItems.size}") {
                 SectionCard("Action items", Icons.Filled.TaskAlt) {
                     insights.actionItems.forEach { item ->
                         Row(verticalAlignment = Alignment.Top) {
@@ -219,10 +234,20 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
                         }
                     }
                 }
-            }
+            })
+        }
+        if (insights.decisions.isNotEmpty()) {
+            add(SummaryPart("decisions", "Decisions ${insights.decisions.size}") {
+                SectionCard("Decisions", Icons.Filled.Gavel) { BulletList(insights.decisions) }
+            })
+        }
+        insights.sections.forEachIndexed { i, section ->
+            add(SummaryPart("section-$i", "${section.title} ${section.items.size}") {
+                SectionCard(section.title, Icons.Filled.ViewAgenda) { BulletList(section.items) }
+            })
         }
         if (meeting.bookmarks.isNotEmpty()) {
-            item {
+            add(SummaryPart("bookmarks", "Bookmarks ${meeting.bookmarks.size}") {
                 SectionCard("Your bookmarks", Icons.Filled.Bookmark) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         meeting.bookmarks.forEach { mark ->
@@ -230,12 +255,15 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
                         }
                     }
                 }
-            }
+            })
         }
-        if (insights.keyPoints.isNotEmpty()) item { SectionCard("Key points", Icons.Filled.Lightbulb) { BulletList(insights.keyPoints) } }
-        if (insights.decisions.isNotEmpty()) item { SectionCard("Decisions", Icons.Filled.Gavel) { BulletList(insights.decisions) } }
+        if (insights.keyPoints.isNotEmpty()) {
+            add(SummaryPart("points", "Key points ${insights.keyPoints.size}") {
+                SectionCard("Key points", Icons.Filled.Lightbulb) { BulletList(insights.keyPoints) }
+            })
+        }
         if (insights.highlights.isNotEmpty()) {
-            item {
+            add(SummaryPart("highlights", "Highlights ${insights.highlights.size}") {
                 SectionCard("Highlights", Icons.Filled.Star) {
                     insights.highlights.forEach { h ->
                         val at = parseTimestamp(h.timestamp)
@@ -252,84 +280,132 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
                         }
                     }
                 }
-            }
+            })
+        }
+        if (insights.nextSteps.isNotEmpty()) {
+            add(SummaryPart("next", "Next steps ${insights.nextSteps.size}") {
+                SectionCard("Next steps", Icons.Filled.TrendingUp) { BulletList(insights.nextSteps) }
+            })
+        }
+        if (insights.risks.isNotEmpty()) {
+            add(SummaryPart("risks", "Risks ${insights.risks.size}") {
+                SectionCard("Risks & concerns", Icons.Filled.Warning) { BulletList(insights.risks) }
+            })
         }
         if (insights.topics.isNotEmpty()) {
-            item {
-                SectionCard("Topics", Icons.Filled.Topic) {
+            add(SummaryPart("topics", "Topics ${insights.topics.size}") {
+                FoldedCard("Topics", Icons.Filled.Topic, meeting.id) {
                     insights.topics.forEach { t ->
                         Text(t.name, style = MaterialTheme.typography.titleSmall)
                         if (t.summary.isNotBlank()) Text(t.summary, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+            })
+        }
+        if (insights.sentiment.isNotBlank()) {
+            add(SummaryPart("tone", null) {
+                FoldedCard("Tone", Icons.Filled.Forum, meeting.id) { Text(insights.sentiment, style = MaterialTheme.typography.bodyMedium) }
+            })
+        }
+    }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    // Items before the parts: the format row and the jump chips.
+    val lead = 2
+    LazyColumn(state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item(key = "format") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FormatRow(meeting, enabled = Busy.INSIGHTS !in busy, onPick = vm::setMeetingType)
+                if (Busy.INSIGHTS in busy) {
+                    Spacer(Modifier.width(12.dp))
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Writing again…", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
-        if (insights.nextSteps.isNotEmpty()) item { SectionCard("Next steps", Icons.Filled.TrendingUp) { BulletList(insights.nextSteps) } }
-        if (insights.risks.isNotEmpty()) item { SectionCard("Risks & concerns", Icons.Filled.Warning) { BulletList(insights.risks) } }
-        if (insights.sentiment.isNotBlank()) {
-            item { SectionCard("Tone", Icons.Filled.Forum) { Text(insights.sentiment, style = MaterialTheme.typography.bodyMedium) } }
+        item(key = "jump") {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                parts.forEachIndexed { i, part ->
+                    val chip = part.chip ?: return@forEachIndexed
+                    SuggestionChip(onClick = { scope.launch { listState.animateScrollToItem(lead + i) } }, label = { Text(chip) })
+                }
+            }
+        }
+        items(parts, key = { it.key }) { part -> part.content() }
+    }
+}
+
+/** A card that starts folded, for background like topics and tone. */
+@Composable
+private fun FoldedCard(title: String, icon: ImageVector, meetingId: String, content: @Composable () -> Unit) {
+    var open by rememberSaveable(meetingId, title) { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth().clickable { open = !open },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = if (open) "Fold" else "Unfold")
+            }
+            if (open) content()
         }
     }
 }
 
+/**
+ * Listening in the top bar: read the summary aloud, or play, share or create the audio briefing.
+ * While something is being read it becomes a Stop button.
+ */
 @Composable
-private fun ListenRow(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
+internal fun ListenAction(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
     val speaking by vm.speaking.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    if (speaking != null) {
+        IconButton(onClick = vm::stopSpeaking) { Icon(Icons.Filled.Stop, contentDescription = "Stop listening") }
+        return
+    }
+    if (Busy.BRIEFING in busy) {
+        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        return
+    }
     val briefing = meeting.briefing
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Headphones, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Listen", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                if (speaking != null) {
-                    TextButton(onClick = vm::stopSpeaking) {
-                        Icon(Icons.Filled.Stop, null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Stop")
-                    }
-                }
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(
-                    onClick = { vm.speak(MeetingViewModel.SUMMARY_KEY, vm.summaryForSpeech()) },
-                    enabled = speaking != MeetingViewModel.SUMMARY_KEY,
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Read summary")
-                }
-                when {
-                    Busy.BRIEFING in busy -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Creating audio briefing…", style = MaterialTheme.typography.bodySmall)
-                    }
-                    briefing?.audioPath != null -> {
-                        FilledTonalButton(onClick = vm::playBriefing, enabled = speaking != MeetingViewModel.BRIEFING_KEY) {
-                            Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Play briefing")
-                        }
-                        IconButton(onClick = { shareAudio(context, File(briefing.audioPath!!), meeting.title) }) {
-                            Icon(Icons.Filled.Share, contentDescription = "Share briefing")
-                        }
-                        IconButton(onClick = vm::regenerateBriefing) {
-                            Icon(Icons.Filled.Refresh, contentDescription = "Recreate briefing")
-                        }
-                    }
-                    else -> OutlinedButton(onClick = vm::createBriefing) {
-                        Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Create audio briefing")
-                    }
-                }
-            }
+    val hasSummary = meeting.insights != null
+    Box {
+        IconButton(onClick = { open = true }) { Icon(Icons.Filled.Headphones, contentDescription = "Listen") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Read the summary aloud") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.VolumeUp, null) },
+                enabled = hasSummary,
+                onClick = { open = false; vm.speak(MeetingViewModel.SUMMARY_KEY, vm.summaryForSpeech()) },
+            )
             if (briefing?.audioPath != null) {
-                Text(
-                    "A one-to-two minute spoken catch-up you can listen to or send to someone who missed the meeting.",
-                    style = MaterialTheme.typography.bodySmall,
+                DropdownMenuItem(
+                    text = { Text("Play the audio briefing") },
+                    leadingIcon = { Icon(Icons.Filled.PlayArrow, null) },
+                    onClick = { open = false; vm.playBriefing() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Share the audio briefing") },
+                    leadingIcon = { Icon(Icons.Filled.Share, null) },
+                    onClick = { open = false; shareAudio(context, File(briefing.audioPath!!), meeting.title) },
+                )
+                DropdownMenuItem(
+                    text = { Text("Create the briefing again") },
+                    leadingIcon = { Icon(Icons.Filled.Refresh, null) },
+                    onClick = { open = false; vm.regenerateBriefing() },
+                )
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Create an audio briefing") },
+                    leadingIcon = { Icon(Icons.Filled.AutoAwesome, null) },
+                    enabled = hasSummary,
+                    onClick = { open = false; vm.createBriefing() },
                 )
             }
         }
@@ -361,6 +437,10 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
     var assigning by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<TranscriptSegment?>(null) }
     val listState = rememberLazyListState()
+    // Find in transcript, and showing one speaker's lines.
+    var finding by rememberSaveable { mutableStateOf(false) }
+    var find by rememberSaveable { mutableStateOf("") }
+    var only by rememberSaveable { mutableStateOf<String?>(null) }
 
     if (meeting.segments.isEmpty()) {
         EmptyState(
@@ -371,15 +451,26 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
         return
     }
 
+    val shown = remember(meeting.segments, only) { if (only == null) meeting.segments else meeting.segments.filter { it.speakerId == only } }
+    val matches = remember(shown, find) {
+        val q = find.trim()
+        if (q.length < 2) emptyList() else shown.indices.filter { shown[it].text.contains(q, ignoreCase = true) }
+    }
+    var current by remember(matches) { mutableIntStateOf(0) }
+    LaunchedEffect(current, matches) {
+        matches.getOrNull(current)?.let { listState.animateScrollToItem((it - 1).coerceAtLeast(0)) }
+    }
+    val currentMatchId = matches.getOrNull(current)?.let { shown[it].id }
+
     val activeId = if (playing) meeting.segments.lastOrNull { it.startMs <= position }?.id else null
     LaunchedEffect(activeId) {
-        val index = meeting.segments.indexOfFirst { it.id == activeId }
+        val index = shown.indexOfFirst { it.id == activeId }
         if (index >= 0) listState.animateScrollToItem(index)
     }
     // Jump once to the line a search result or answer pointed at.
     var focused by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(focusSegmentId) {
-        val index = meeting.segments.indexOfFirst { it.id == focusSegmentId }
+        val index = shown.indexOfFirst { it.id == focusSegmentId }
         if (index >= 0 && !focused) {
             focused = true
             listState.scrollToItem((index - 1).coerceAtLeast(0))
@@ -387,10 +478,27 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
     }
 
     Column(Modifier.fillMaxSize()) {
-        SpeakersRow(meeting, onSpeakerClick = { speakerDialog = it })
-        if (meeting.status != MeetingStatus.RECORDING) {
-            var showCount by remember { mutableStateOf(false) }
-            Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (finding) {
+            FindBar(
+                query = find,
+                onQuery = { find = it },
+                matchCount = matches.size,
+                current = current,
+                onPrevious = { if (matches.isNotEmpty()) current = (current - 1 + matches.size) % matches.size },
+                onNext = { if (matches.isNotEmpty()) current = (current + 1) % matches.size },
+                onClose = {
+                    finding = false
+                    find = ""
+                    only = null
+                },
+            )
+            SpeakerFilter(meeting, selected = only, onSelect = { only = it })
+        } else {
+            SpeakersRow(meeting, onSpeakerClick = { speakerDialog = it })
+        }
+        var showCount by remember { mutableStateOf(false) }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (meeting.status != MeetingStatus.RECORDING) {
                 TextButton(onClick = { showCount = !showCount }) {
                     Text("People: ${meeting.expectedSpeakers?.toString() ?: "auto"}")
                 }
@@ -400,6 +508,12 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
                     Text("Re-detect speakers")
                 }
             }
+            Spacer(Modifier.weight(1f))
+            if (!finding) {
+                IconButton(onClick = { finding = true }) { Icon(Icons.Filled.Search, contentDescription = "Find in transcript") }
+            }
+        }
+        if (meeting.status != MeetingStatus.RECORDING) {
             if (showCount) {
                 ExpectedSpeakersRow(meeting.expectedSpeakers, onSelect = { vm.setExpectedSpeakers(it) })
                 Spacer(Modifier.size(4.dp))
@@ -441,11 +555,13 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
             )
         }
         val marks = bookmarksByLine(meeting)
+        val matchColor = MaterialTheme.colorScheme.tertiaryContainer
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 24.dp)) {
-            items(meeting.segments, key = { it.id }) { seg ->
+            items(shown, key = { it.id }) { seg ->
                 val selected = seg.id in selection
                 val background = when {
                     selected -> MaterialTheme.colorScheme.primaryContainer
+                    seg.id == currentMatchId -> MaterialTheme.colorScheme.secondaryContainer
                     seg.id == activeId -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
                     seg.id == focusSegmentId -> MaterialTheme.colorScheme.secondaryContainer
                     else -> MaterialTheme.colorScheme.surface
@@ -466,7 +582,7 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
                         Spacer(Modifier.width(8.dp))
                         Text(TranscriptFormatter.timestamp(seg.startMs), style = MaterialTheme.typography.labelSmall)
                     }
-                    Text(seg.text, style = MaterialTheme.typography.bodyLarge)
+                    Text(highlight(seg.text, find, matchColor), style = MaterialTheme.typography.bodyLarge)
                     // A mark refers to what was said just before it, so playback starts a little earlier.
                     marks[seg.id]?.forEach { mark ->
                         BookmarkMarker(mark, onClick = { vm.player.seekTo((mark.atMs - BOOKMARK_LEAD_MS).coerceAtLeast(0)) })
@@ -508,6 +624,72 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
             onSave = { vm.editSegment(seg.id, it); editing = null },
             onDelete = { vm.deleteSegment(seg.id); editing = null },
         )
+    }
+}
+
+/** The search box for finding words in one transcript, with "3 of 12" and next/previous. */
+@Composable
+private fun FindBar(
+    query: String,
+    onQuery: (String) -> Unit,
+    matchCount: Int,
+    current: Int,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQuery,
+            placeholder = { Text("Find in transcript") },
+            leadingIcon = { Icon(Icons.Filled.Search, null) },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        if (query.trim().length >= 2) {
+            Text(
+                if (matchCount == 0) "None" else "${current + 1}/$matchCount",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        IconButton(onClick = onPrevious, enabled = matchCount > 0) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Previous match") }
+        IconButton(onClick = onNext, enabled = matchCount > 0) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Next match") }
+        IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Close find") }
+    }
+}
+
+/** Shows everyone's lines, or one speaker's. */
+@Composable
+private fun SpeakerFilter(meeting: Meeting, selected: String?, onSelect: (String?) -> Unit) {
+    val present = meeting.segments.mapNotNull { it.speakerId }.toSet()
+    val speakers = meeting.speakers.filter { it.id in present }
+    if (speakers.size < 2) return
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(selected = selected == null, onClick = { onSelect(null) }, label = { Text("Everyone") })
+        speakers.forEach { speaker ->
+            FilterChip(selected = selected == speaker.id, onClick = { onSelect(speaker.id) }, label = { Text(speaker.name) })
+        }
+    }
+}
+
+/** [text] with every occurrence of [query] (two letters or more) marked. */
+private fun highlight(text: String, query: String, color: Color): AnnotatedString {
+    val q = query.trim()
+    if (q.length < 2) return AnnotatedString(text)
+    return buildAnnotatedString {
+        append(text)
+        var from = 0
+        while (true) {
+            val at = text.indexOf(q, from, ignoreCase = true)
+            if (at < 0) break
+            addStyle(SpanStyle(background = color, fontWeight = FontWeight.SemiBold), at, at + q.length)
+            from = at + q.length
+        }
     }
 }
 

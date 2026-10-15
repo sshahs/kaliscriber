@@ -9,6 +9,7 @@ import android.util.Log
 import com.kaliscriber.app.backup.BackupManager
 import com.kaliscriber.app.calendar.CalendarService
 import com.kaliscriber.app.data.AndroidSqlDb
+import com.kaliscriber.app.data.Deletions
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.app.export.MeetingExporter
 import com.kaliscriber.app.importing.AudioImporter
@@ -186,6 +187,9 @@ class AppContainer(context: Context) {
 
     /** What the app stores, and deleting old recordings as the user chose. */
     val storage = StorageManager(appContext, meetings, settings, jobs)
+
+    /** Deletions that wait a moment so they can be undone. */
+    val deletions by lazy { Deletions(scope, meetings, notes, storage) }
 
     /** Encrypted backups of meetings, notes, voices and settings, and restoring them. */
     val backups by lazy {

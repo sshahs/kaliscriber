@@ -22,6 +22,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.MusicOff
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Spellcheck
+import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material3.Badge
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Description
@@ -103,13 +119,18 @@ fun MeetingScreen(
     val context = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(initialTab.coerceIn(0, 3)) }
     var exportOpen by remember { mutableStateOf(false) }
-    var menuOpen by remember { mutableStateOf(false) }
+    var toolsOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    var confirmDeleteRecording by remember { mutableStateOf(false) }
     var showTimeline by remember { mutableStateOf(false) }
+    val recordingPending by vm.recordingPending.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) {
+        vm.undoables.collect { done ->
+            val result = snackbar.showSnackbar(done.message, actionLabel = "Undo", duration = SnackbarDuration.Short)
+            if (result == SnackbarResult.ActionPerformed) done.undo()
+        }
+    }
     LaunchedEffect(Unit) {
         vm.exportResults.collect { result ->
             val url = result.url
@@ -149,9 +170,9 @@ fun MeetingScreen(
             else -> vm.export(target)
         }
     }
-    LaunchedEffect(meeting?.audioPath, meeting?.status) {
-        // Only play the recording once it has been finalized.
-        vm.player.load(meeting?.takeIf { it.status != MeetingStatus.RECORDING }?.audioPath)
+    LaunchedEffect(meeting?.audioPath, meeting?.status, recordingPending) {
+        // Only play the recording once it has been finalized, and not while it is being deleted.
+        vm.player.load(meeting?.takeIf { it.status != MeetingStatus.RECORDING && !recordingPending }?.audioPath)
     }
 
     val m = meeting
@@ -168,36 +189,19 @@ fun MeetingScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
+                    ListenAction(m, busy, vm)
                     if (Busy.EXPORT in busy) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     } else {
                         IconButton(onClick = { exportOpen = true }) {
-                            Icon(Icons.Filled.IosShare, contentDescription = "Export")
+                            Icon(Icons.Filled.IosShare, contentDescription = "Share or export")
                         }
                     }
-                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; renaming = true })
-                        DropdownMenuItem(text = { Text("Regenerate summary") }, onClick = { menuOpen = false; vm.generateInsights() })
-                        DropdownMenuItem(text = { Text("Regenerate gaps & questions") }, onClick = { menuOpen = false; vm.generateGaps() })
-                        DropdownMenuItem(text = { Text("Re-detect speakers with AI") }, onClick = { menuOpen = false; vm.separateSpeakers() })
-                        DropdownMenuItem(text = { Text("Fix words from glossary") }, onClick = { menuOpen = false; vm.applyGlossary() })
-                        DropdownMenuItem(text = { Text("Suggest speaker names") }, onClick = { menuOpen = false; vm.suggestNames() })
-                        DropdownMenuItem(text = { Text("Save as note") }, onClick = {
-                            menuOpen = false
-                            scope.launch { vm.saveAsNote()?.let(onOpenNote) }
-                        })
-                        DropdownMenuItem(text = { Text("Processing details") }, onClick = { menuOpen = false; showTimeline = true })
-                        DropdownMenuItem(text = { Text("AI settings") }, onClick = { menuOpen = false; onOpenSettings() })
-                        if (m.audioPath != null && m.status == MeetingStatus.READY) {
-                            DropdownMenuItem(text = { Text("Delete recording only") }, onClick = { menuOpen = false; confirmDeleteRecording = true })
-                        }
-                        DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; confirmDelete = true })
-                    }
+                    IconButton(onClick = { toolsOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More tools") }
                 },
             )
         },
-        bottomBar = { if (m.audioPath != null && m.status != MeetingStatus.RECORDING) PlayerBar(vm.player) },
+        bottomBar = { if (m.audioPath != null && m.status != MeetingStatus.RECORDING && !recordingPending) PlayerBar(vm.player) },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
@@ -210,9 +214,22 @@ fun MeetingScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
+            val unanswered = m.gaps?.questions?.count { it.answer.isNullOrBlank() } ?: 0
             ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
-                listOf("Summary", "Transcript", "Ask AI", "Gaps & questions").forEachIndexed { i, label ->
-                    Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
+                listOf("Summary", "Transcript", "Ask AI", "Questions").forEachIndexed { i, label ->
+                    Tab(
+                        selected = tab == i,
+                        onClick = { tab = i },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(label)
+                                if (i == 3 && unanswered > 0) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Badge { Text("$unanswered") }
+                                }
+                            }
+                        },
+                    )
                 }
             }
             when (tab) {
@@ -246,6 +263,27 @@ fun MeetingScreen(
         )
     }
 
+    if (toolsOpen) {
+        ToolsSheet(
+            meeting = m,
+            onDismiss = { toolsOpen = false },
+            onRename = { renaming = true },
+            onSummary = vm::generateInsights,
+            onQuestions = vm::generateGaps,
+            onSeparateSpeakers = vm::separateSpeakers,
+            onSuggestNames = vm::suggestNames,
+            onGlossary = vm::applyGlossary,
+            onSaveNote = { scope.launch { vm.saveAsNote()?.let(onOpenNote) } },
+            onDetails = { showTimeline = true },
+            onSettings = onOpenSettings,
+            onDeleteRecording = if (m.audioPath != null && m.status == MeetingStatus.READY && !recordingPending) ({ vm.deleteRecording(); Unit }) else null,
+            onDelete = {
+                vm.delete()
+                onBack()
+            },
+        )
+    }
+
     if (renaming) {
         var title by remember { mutableStateOf(m.title) }
         AlertDialog(
@@ -267,39 +305,68 @@ fun MeetingScreen(
             confirmButton = { TextButton(onClick = { showTimeline = false }) { Text("Close") } },
         )
     }
-    if (confirmDeleteRecording) {
-        AlertDialog(
-            onDismissRequest = { confirmDeleteRecording = false },
-            title = { Text("Delete the recording?") },
-            text = {
-                Text(
-                    "The audio is deleted to save space. The transcript, summary, notes and chat stay. " +
-                        "Without the audio you can't play the meeting, detect speakers again or transcribe it again.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmDeleteRecording = false
-                    vm.deleteRecording()
-                }) { Text("Delete recording") }
-            },
-            dismissButton = { TextButton(onClick = { confirmDeleteRecording = false }) { Text("Cancel") } },
-        )
+}
+
+/** Less frequent actions, each with a line on what it does. */
+@Composable
+private fun ToolsSheet(
+    meeting: Meeting,
+    onDismiss: () -> Unit,
+    onRename: () -> Unit,
+    onSummary: () -> Unit,
+    onQuestions: () -> Unit,
+    onSeparateSpeakers: () -> Unit,
+    onSuggestNames: () -> Unit,
+    onGlossary: () -> Unit,
+    onSaveNote: () -> Unit,
+    onDetails: () -> Unit,
+    onSettings: () -> Unit,
+    onDeleteRecording: (() -> Unit)?,
+    onDelete: () -> Unit,
+) {
+    val hasTranscript = meeting.hasTranscript
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            ToolItem(Icons.Filled.Edit, "Rename", "Give the meeting a title of your own", onDismiss, action = onRename)
+            ToolItem(Icons.Filled.AutoAwesome, "Write the summary again", "From the whole transcript, with the format chosen on the summary", onDismiss, hasTranscript, action = onSummary)
+            ToolItem(Icons.AutoMirrored.Filled.HelpOutline, "Find gaps and questions again", "What's missing or unclear, and questions only you can answer", onDismiss, hasTranscript, action = onQuestions)
+            ToolItem(Icons.Filled.RecordVoiceOver, "Separate speakers with AI", "When everyone ended up as one speaker, or speakers are mixed up", onDismiss, hasTranscript, action = onSeparateSpeakers)
+            ToolItem(Icons.Filled.Person, "Suggest speaker names", "From introductions and how people address each other", onDismiss, hasTranscript, action = onSuggestNames)
+            ToolItem(Icons.Filled.Spellcheck, "Fix words from your glossary", "Corrects misheard names and terms in the transcript", onDismiss, hasTranscript, action = onGlossary)
+            ToolItem(Icons.AutoMirrored.Filled.NoteAdd, "Save as note", "An editable copy of the notes and transcript", onDismiss, action = onSaveNote)
+            ToolItem(Icons.Filled.Timeline, "Processing details", "Each step, how long it took, and what the AI requests used", onDismiss, action = onDetails)
+            ToolItem(Icons.Filled.Settings, "AI settings", "Models, keys and how meetings are processed", onDismiss, action = onSettings)
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            if (onDeleteRecording != null) {
+                ToolItem(Icons.Filled.MusicOff, "Delete the recording only", "Frees space; the transcript, summary and notes stay", onDismiss, danger = true, action = onDeleteRecording)
+            }
+            ToolItem(Icons.Filled.Delete, "Delete meeting", "Recording, transcript and notes. You can undo for a few seconds.", onDismiss, danger = true, action = onDelete)
+        }
     }
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete meeting?") },
-            text = { Text("The recording, transcript and insights will be permanently deleted.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    scope.launch { vm.delete() }
-                }) { Text("Delete") }
-            },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
-        )
-    }
+}
+
+@Composable
+private fun ToolItem(
+    icon: ImageVector,
+    title: String,
+    about: String,
+    onDismiss: () -> Unit,
+    enabled: Boolean = true,
+    danger: Boolean = false,
+    action: () -> Unit,
+) {
+    val color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+    ListItem(
+        headlineContent = { Text(title, color = color) },
+        supportingContent = { Text(about) },
+        leadingContent = { Icon(icon, null, tint = if (danger) color else MaterialTheme.colorScheme.onSurfaceVariant) },
+        modifier = Modifier
+            .clickable(enabled = enabled) {
+                onDismiss()
+                action()
+            }
+            .alpha(if (enabled) 1f else 0.4f),
+    )
 }
 
 @Composable

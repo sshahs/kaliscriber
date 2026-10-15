@@ -5,6 +5,7 @@ import android.media.MediaPlayer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
+import com.kaliscriber.app.data.Deletions
 import com.kaliscriber.app.storage.formatBytes
 import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.export.exportMessage
@@ -52,6 +53,17 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
 
     private val _messages = Channel<String>(Channel.BUFFERED)
     val messages = _messages.receiveAsFlow()
+
+    /** Something just done that the snackbar can offer to undo. */
+    class Undoable(val message: String, val undo: () -> Unit)
+
+    private val _undoables = Channel<Undoable>(Channel.BUFFERED)
+    val undoables = _undoables.receiveAsFlow()
+
+    /** True while the recording is about to be deleted (and can still be kept). */
+    val recordingPending: StateFlow<Boolean> = container.deletions.pending
+        .map { list -> list.any { it.id == meetingId && it.kind == Deletions.Kind.RECORDING } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** Transcript segments selected with a long press. */
     val selection = MutableStateFlow<Set<String>>(emptySet())
@@ -371,7 +383,17 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         viewModelScope.launch { _messages.send(text) }
     }
     fun dismissSuggestion(speakerId: String) = viewModelScope.launch { repo.dismissSuggestion(meetingId, speakerId) }
-    fun mergeSpeaker(fromId: String, intoId: String) = viewModelScope.launch { repo.mergeSpeakers(meetingId, fromId, intoId) }
+    fun mergeSpeaker(fromId: String, intoId: String) = viewModelScope.launch {
+        val before = repo.get(meetingId) ?: return@launch
+        val from = before.speaker(fromId)?.name ?: return@launch
+        val into = before.speaker(intoId)?.name ?: return@launch
+        repo.mergeSpeakers(meetingId, fromId, intoId)
+        _undoables.send(
+            Undoable("Merged $from into $into") {
+                viewModelScope.launch { repo.update(meetingId) { it.copy(speakers = before.speakers, segments = before.segments) } }
+            },
+        )
+    }
 
     fun assignSelection(speakerId: String?, newName: String?) = viewModelScope.launch {
         val ids = selection.value
@@ -390,20 +412,26 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         return container.notes.create(title = m.title, content = TranscriptFormatter.markdown(m), meetingId = m.id).id
     }
 
-    suspend fun delete() {
-        player.release()
-        repo.delete(meetingId)
+    /** Deletes the meeting in a few seconds; the home screen offers Undo meanwhile. */
+    fun delete() {
+        player.load(null)
+        container.deletions.delete(meetingId, Deletions.Kind.MEETING, meeting.value?.title.orEmpty())
     }
 
-    /** Deletes the recording to save space, keeping the transcript, summary and notes. */
+    /** Deletes the recording in a few seconds to save space, keeping the transcript, summary and notes. */
     fun deleteRecording() = viewModelScope.launch {
         if (meetingId in container.jobs.active.value) {
             _messages.send("Wait until this meeting has finished processing.")
             return@launch
         }
         player.load(null)
-        val freed = container.storage.deleteRecording(meetingId)
-        _messages.send("Recording deleted, ${formatBytes(freed)} freed. The transcript and notes are kept.")
+        val title = meeting.value?.title.orEmpty()
+        container.deletions.delete(meetingId, Deletions.Kind.RECORDING, title)
+        _undoables.send(
+            Undoable("Recording deleted. The transcript and notes are kept.") {
+                container.deletions.undo(Deletions.Pending(meetingId, Deletions.Kind.RECORDING, title))
+            },
+        )
     }
 
     fun markdown(): String = meeting.value?.let(TranscriptFormatter::markdown).orEmpty()

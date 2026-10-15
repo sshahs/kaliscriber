@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
+import com.kaliscriber.app.data.Deletions
 import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.app.speech.ModelCatalog
 import com.kaliscriber.app.speech.ModelState
@@ -24,9 +25,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.update
 import com.kaliscriber.core.ai.MeetingType
 import com.kaliscriber.core.library.MeetingList
 import com.kaliscriber.core.tasks.ActionItems
@@ -41,8 +40,7 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
     val filter = MutableStateFlow(MeetingList.Filter())
 
     /** Meetings and notes deleted a moment ago, hidden while their deletion can still be undone. */
-    private val pendingDeletes = MutableStateFlow<Set<String>>(emptySet())
-    private val deleteJobs = HashMap<String, Job>()
+    private val pendingDeletes = container.deletions.hidden
 
     val meetings: StateFlow<List<Meeting>> = combine(container.meetings.meetings, query, filter, pendingDeletes) { list, q, f, hidden ->
         // Transcripts are searched through the index (see searchResults).
@@ -109,29 +107,14 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
 
     suspend fun createNote(): String = container.notes.create().id
 
-    /**
-     * Hides a meeting or note at once and deletes it after [UNDO_MS] unless [undoDelete] is called.
-     * The deletion runs in the app's scope, so leaving the screen doesn't cancel it.
-     */
-    fun deleteLater(id: String, isNote: Boolean) {
-        pendingDeletes.update { it + id }
-        deleteJobs.remove(id)?.cancel()
-        deleteJobs[id] = container.scope.launch {
-            delay(UNDO_MS)
-            if (isNote) container.notes.delete(id) else container.meetings.delete(id)
-            pendingDeletes.update { it - id }
-        }
-    }
+    /** Hides a meeting or note at once and deletes it a few seconds later unless undone (see [Deletions]). */
+    fun deleteLater(id: String, title: String, isNote: Boolean) =
+        container.deletions.delete(id, if (isNote) Deletions.Kind.NOTE else Deletions.Kind.MEETING, title)
 
-    fun undoDelete(id: String) {
-        deleteJobs.remove(id)?.cancel()
-        pendingDeletes.update { it - id }
-    }
+    /** Deletions waiting to happen, for the snackbar's Undo. */
+    val pendingDeletions: StateFlow<List<Deletions.Pending>> = container.deletions.pending
 
-    private companion object {
-        /** Longer than the snackbar offering Undo is shown. */
-        const val UNDO_MS = 6_000L
-    }
+    fun undoDelete(item: Deletions.Pending) = container.deletions.undo(item)
 
     /** Copies the picked audio into app storage and transcribes it in the background. */
     suspend fun importAudio(uri: Uri): Result<String> = runCatching { container.importer.import(uri) }

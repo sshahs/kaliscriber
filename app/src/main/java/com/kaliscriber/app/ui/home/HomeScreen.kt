@@ -100,6 +100,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaliscriber.core.transcript.TranscriptFiles
 import com.kaliscriber.app.LaunchRequest
+import com.kaliscriber.app.data.Deletions
 import com.kaliscriber.app.appContainer
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.recording.RecordingState
@@ -186,13 +187,21 @@ fun HomeScreen(
         if (needed.isEmpty()) startRecording() else permissions.launch(needed.toTypedArray())
     }
 
-    /** Deletes after a moment, with Undo in the snackbar meanwhile. */
-    fun delete(id: String, title: String, isNote: Boolean) {
-        vm.deleteLater(id, isNote)
-        scope.launch {
-            snackbar.currentSnackbarData?.dismiss()
-            val result = snackbar.showSnackbar("Deleted “${title.take(40)}”", actionLabel = "Undo", duration = SnackbarDuration.Short)
-            if (result == SnackbarResult.ActionPerformed) vm.undoDelete(id)
+    /** Deletes after a moment; the snackbar below offers Undo meanwhile. */
+    fun delete(id: String, title: String, isNote: Boolean) = vm.deleteLater(id, title, isNote)
+
+    // Undo for meetings and notes deleted here or from their own screen.
+    LaunchedEffect(Unit) {
+        val effect = this
+        val announced = mutableSetOf<String>()
+        vm.pendingDeletions.collect { list ->
+            val fresh = list.lastOrNull { it.kind != Deletions.Kind.RECORDING && it.key !in announced } ?: return@collect
+            announced += fresh.key
+            effect.launch {
+                snackbar.currentSnackbarData?.dismiss()
+                val result = snackbar.showSnackbar("Deleted “${fresh.label.take(40)}”", actionLabel = "Undo", duration = SnackbarDuration.Short)
+                if (result == SnackbarResult.ActionPerformed) vm.undoDelete(fresh)
+            }
         }
     }
 
