@@ -5,6 +5,7 @@ import android.media.MediaPlayer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
+import com.kaliscriber.app.storage.formatBytes
 import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.export.exportMessage
 import com.kaliscriber.app.speech.VoiceRecorder
@@ -392,6 +393,17 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     suspend fun delete() {
         player.release()
         repo.delete(meetingId)
+    }
+
+    /** Deletes the recording to save space, keeping the transcript, summary and notes. */
+    fun deleteRecording() = viewModelScope.launch {
+        if (meetingId in container.jobs.active.value) {
+            _messages.send("Wait until this meeting has finished processing.")
+            return@launch
+        }
+        player.load(null)
+        val freed = container.storage.deleteRecording(meetingId)
+        _messages.send("Recording deleted, ${formatBytes(freed)} freed. The transcript and notes are kept.")
     }
 
     fun markdown(): String = meeting.value?.let(TranscriptFormatter::markdown).orEmpty()

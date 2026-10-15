@@ -184,6 +184,8 @@ data class AppSettings(
     val export: ExportSettings = ExportSettings(),
     /** Android's noise suppression and automatic volume while recording. */
     val audioCleanup: Boolean = true,
+    /** Recordings of finished meetings are deleted after this many days, keeping transcripts; 0 keeps them. */
+    val keepRecordingsDays: Int = 0,
     /** Which microphone to record meetings with. */
     val microphone: Microphone = Microphone.AUTO,
     /** Prices the user entered, per "provider/model", to estimate what AI requests cost. */

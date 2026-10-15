@@ -20,8 +20,16 @@ class MeetingJobs(private val context: Context, private val scope: CoroutineScop
 
     private val _active = MutableStateFlow<Set<String>>(emptySet())
 
-    /** Meetings with a job running. */
+    /** Meetings with a job running, and app jobs (ids starting with [APP_JOB]). */
     val active: StateFlow<Set<String>> = _active.asStateFlow()
+
+    private val _appStep = MutableStateFlow<Pair<String?, Int?>>(null to null)
+    /** What an app job (such as a backup) is doing, and its percentage when known. */
+    val appStep: StateFlow<Pair<String?, Int?>> = _appStep.asStateFlow()
+
+    fun reportAppStep(step: String, percent: Int? = null) {
+        _appStep.value = step to percent
+    }
 
     /**
      * Starts [block] for [meetingId] and waits for it. Cancelling the caller (e.g. leaving the screen)
@@ -41,6 +49,30 @@ class MeetingJobs(private val context: Context, private val scope: CoroutineScop
         }
         startService()
         job.await()
+    }
+
+    /** Runs [block] as the app job [name] under the processing service, like [run], and returns its result. */
+    suspend fun <T> runApp(name: String, block: suspend () -> T): T {
+        val id = APP_JOB + name
+        synchronized(this) {
+            if (id in _active.value) throw AiException("This is already running.")
+            _active.value = _active.value + id
+        }
+        val job = scope.async {
+            try {
+                block()
+            } finally {
+                synchronized(this@MeetingJobs) { _active.value = _active.value - id }
+                _appStep.value = null to null
+            }
+        }
+        startService()
+        return job.await()
+    }
+
+    companion object {
+        /** Prefix of jobs that aren't about one meeting. */
+        const val APP_JOB = "app:"
     }
 
     private fun startService() {

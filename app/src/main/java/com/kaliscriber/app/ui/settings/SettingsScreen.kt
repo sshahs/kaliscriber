@@ -146,6 +146,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             item { ExportSection(settings, vm) }
             item { ProcessingSettings(settings, vm) }
+            item { StorageSection(settings, vm) }
+            item { BackupSection(vm) }
             item {
                 Text(
                     "Privacy: recordings, transcripts and notes stay on this device. Audio and text are sent only to the AI services you select above, using your keys.",

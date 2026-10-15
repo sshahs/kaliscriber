@@ -48,6 +48,8 @@ data class Meeting(
     val bookmarks: List<Bookmark> = emptyList(),
     /** The summary format the user chose; null guesses it from the title (see [MeetingType.of]). */
     val type: MeetingType? = null,
+    /** When the recording was deleted to save space (the transcript and notes were kept). */
+    val audioDeletedAt: Long? = null,
     /**
      * A summary of [segments] kept with the meeting, so lists, People pages and search can use it
      * while the transcript itself stays on disk (meeting lists leave [segments] empty).

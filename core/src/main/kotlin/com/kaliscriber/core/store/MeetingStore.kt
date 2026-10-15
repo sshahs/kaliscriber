@@ -148,6 +148,20 @@ class MeetingStore(
         if (full.segments.isNotEmpty()) _changes.tryEmit(Change.Transcript(full.id))
     }
 
+    /** Adds [meeting] unless one with its id is already stored; true if it was added. */
+    suspend fun putIfAbsent(meeting: Meeting): Boolean = mutex.withLock {
+        loadLocked()
+        if (meeting.id in _items.value) return@withLock false
+        val full = meeting.copy(stats = TranscriptStats.of(meeting.segments, clock.now()))
+        withContext(Dispatchers.IO) {
+            if (full.segments.isNotEmpty()) writeTranscript(full.id, full.segments)
+            writeMeta(full)
+        }
+        remember(full)
+        if (full.segments.isNotEmpty()) _changes.tryEmit(Change.Transcript(full.id))
+        true
+    }
+
     /** Atomically transforms the meeting with [id] (with its transcript); returns the result, or null if missing. */
     suspend fun update(id: String, transform: (Meeting) -> Meeting): Meeting? = mutex.withLock {
         loadLocked()

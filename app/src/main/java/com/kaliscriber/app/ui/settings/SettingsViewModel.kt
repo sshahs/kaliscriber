@@ -2,7 +2,10 @@ package com.kaliscriber.app.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.net.Uri
 import com.kaliscriber.app.AppContainer
+import com.kaliscriber.app.backup.BackupManager
+import com.kaliscriber.app.storage.StorageManager
 import com.kaliscriber.app.data.ExportSecret
 import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.export.exportMessage
@@ -190,6 +193,35 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             reasoningEffort = s.reasoningEffort,
         )
     }
+
+    private val _storage = MutableStateFlow<StorageManager.Usage?>(null)
+    /** What the app keeps on the phone, once measured. */
+    val storage: StateFlow<StorageManager.Usage?> = _storage.asStateFlow()
+
+    fun measureStorage() = viewModelScope.launch { _storage.value = container.storage.usage() }
+
+    /** How many recordings, and how many bytes, keeping recordings for [days] would delete now. */
+    fun recordingsDue(days: Int): Pair<Int, Long> = container.storage.due(days).let { it.size to container.storage.dueBytes(it) }
+
+    /** Keeps recordings for [days] (0 = forever), deleting older ones now. */
+    fun keepRecordings(days: Int) = viewModelScope.launch {
+        container.settingsStore.update { it.copy(keepRecordingsDays = days) }
+        container.storage.applyRetention()
+        _storage.value = container.storage.usage()
+    }
+
+    val backupState: StateFlow<BackupManager.State> = container.backups.state
+
+    fun backupFileName(): String = container.backups.suggestedName()
+
+    fun backUp(uri: Uri, password: CharArray, withRecordings: Boolean) = container.backups.backUp(uri, password, withRecordings)
+
+    fun restore(uri: Uri, password: CharArray, replaceSettings: Boolean) = container.backups.restore(uri, password, replaceSettings)
+
+    fun dismissBackup() = container.backups.dismiss()
+
+    /** True while this phone's settings are still the defaults, so a backup's settings lose nothing. */
+    fun settingsUntouched(): Boolean = settings.value == AppSettings()
 
     fun update(transform: (AppSettings) -> AppSettings) {
         viewModelScope.launch { container.settingsStore.update(transform) }

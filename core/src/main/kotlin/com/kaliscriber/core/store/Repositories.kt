@@ -84,6 +84,30 @@ class MeetingRepository(
         withContext(Dispatchers.IO) { File(audioRoot, id).deleteRecursively() }
     }
 
+    /**
+     * Deletes the meeting's recording and any leftover recording chunks to save space, keeping the
+     * transcript, summary and everything else. Returns the bytes freed.
+     */
+    suspend fun deleteRecording(id: String): Long {
+        val meeting = withoutTranscript(id) ?: return 0
+        val dir = File(audioRoot, id)
+        val freed = withContext(Dispatchers.IO) {
+            val chunks = File(dir, "chunks")
+            // Only files in the app's own audio folder are ever deleted.
+            val files = listOfNotNull(meeting.audioPath?.let(::File)?.takeIf { it.isInside(audioRoot) }) + chunks.listFiles().orEmpty()
+            files.filter { it.isFile }.sumOf { f -> f.length().let { size -> if (f.delete()) size else 0L } }
+                .also { chunks.delete() }
+        }
+        update(id) { it.copy(audioPath = null, pendingChunks = emptyList(), audioDeletedAt = clock.now()) }
+        return freed
+    }
+
+    private fun File.isInside(dir: File): Boolean =
+        runCatching { canonicalPath.startsWith(dir.canonicalPath + File.separator) }.getOrDefault(false)
+
+    /** Adds a meeting from a backup unless the phone already has it; true if it was added. */
+    suspend fun restore(meeting: Meeting): Boolean = store.putIfAbsent(meeting)
+
     suspend fun rename(id: String, title: String) = update(id) {
         if (title.isBlank()) it else it.copy(title = title.trim(), autoTitle = false)
     }
@@ -232,4 +256,12 @@ class NoteRepository(
         store.update(id) { old -> transform(old).let { if (it == old) it else it.copy(updatedAt = clock.now()) } }
 
     suspend fun delete(id: String) = store.delete(id)
+
+    /** Adds a note from a backup unless the phone already has it; true if it was added. */
+    suspend fun restore(note: Note): Boolean {
+        store.load()
+        if (store.get(note.id) != null) return false
+        store.put(note)
+        return true
+    }
 }

@@ -106,6 +106,7 @@ fun MeetingScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmDeleteRecording by remember { mutableStateOf(false) }
     var showTimeline by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
@@ -188,6 +189,9 @@ fun MeetingScreen(
                         })
                         DropdownMenuItem(text = { Text("Processing details") }, onClick = { menuOpen = false; showTimeline = true })
                         DropdownMenuItem(text = { Text("AI settings") }, onClick = { menuOpen = false; onOpenSettings() })
+                        if (m.audioPath != null && m.status == MeetingStatus.READY) {
+                            DropdownMenuItem(text = { Text("Delete recording only") }, onClick = { menuOpen = false; confirmDeleteRecording = true })
+                        }
                         DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; confirmDelete = true })
                     }
                 },
@@ -261,6 +265,25 @@ fun MeetingScreen(
                 TimelineList(m, usage, vm.usageCost(usage))
             },
             confirmButton = { TextButton(onClick = { showTimeline = false }) { Text("Close") } },
+        )
+    }
+    if (confirmDeleteRecording) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteRecording = false },
+            title = { Text("Delete the recording?") },
+            text = {
+                Text(
+                    "The audio is deleted to save space. The transcript, summary, notes and chat stay. " +
+                        "Without the audio you can't play the meeting, detect speakers again or transcribe it again.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteRecording = false
+                    vm.deleteRecording()
+                }) { Text("Delete recording") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDeleteRecording = false }) { Text("Cancel") } },
         )
     }
     if (confirmDelete) {
@@ -422,6 +445,12 @@ private fun TimelineList(meeting: Meeting, usage: List<UsageRecord>, cost: Doubl
                 "Ready ${duration(ready.at - stopped.at)} after you stopped recording",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        meeting.audioDeletedAt?.let { at ->
+            Text(
+                "Recording deleted ${DateFormat.getDateInstance(DateFormat.MEDIUM).format(java.util.Date(at))} to save space; the transcript was kept.",
+                style = MaterialTheme.typography.bodySmall,
             )
         }
         if (usage.isNotEmpty()) {

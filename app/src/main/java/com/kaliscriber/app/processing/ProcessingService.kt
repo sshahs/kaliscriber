@@ -62,6 +62,8 @@ class ProcessingService : LifecycleService() {
                     if (meetingId == null) {
                         stop()
                         emptyFlow<Pair<String?, Int?>>()
+                    } else if (meetingId.startsWith(MeetingJobs.APP_JOB)) {
+                        container.jobs.appStep
                     } else {
                         container.meetings.observe(meetingId)
                             .map { m -> m?.processingStep to m?.processingProgress?.let { (it * 100).toInt() } }

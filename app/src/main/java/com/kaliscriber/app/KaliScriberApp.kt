@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.net.ConnectivityManager
 import android.util.Log
+import com.kaliscriber.app.backup.BackupManager
 import com.kaliscriber.app.calendar.CalendarService
 import com.kaliscriber.app.data.AndroidSqlDb
 import com.kaliscriber.app.data.SecretStore
@@ -14,6 +15,7 @@ import com.kaliscriber.app.importing.AudioImporter
 import com.kaliscriber.app.processing.MeetingJobs
 import com.kaliscriber.app.recording.RecordingManager
 import com.kaliscriber.app.recording.RecordingState
+import com.kaliscriber.app.storage.StorageManager
 import com.kaliscriber.app.shortcuts.RecordTileService
 import com.kaliscriber.app.shortcuts.RecordWidget
 import com.kaliscriber.app.speech.LocalSpeechEngine
@@ -22,6 +24,7 @@ import com.kaliscriber.app.speech.ModelManager
 import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.app.speech.SpeechOutput
 import com.kaliscriber.app.tasks.TaskReminders
+import com.kaliscriber.core.backup.LibraryBackup
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.DefaultAiServices
 import com.kaliscriber.core.ai.MeetingAi
@@ -98,7 +101,8 @@ class AppContainer(context: Context) {
     val localSpeech = LocalSpeechEngine(models, settings)
 
     /** Token usage of every AI request, kept on the phone to show what meetings cost. */
-    val usage = UsageLedger(JsonValueStore(File(filesDir, "usage.json"), ListSerializer(UsageRecord.serializer()), emptyList()))
+    private val usageStore = JsonValueStore(File(filesDir, "usage.json"), ListSerializer(UsageRecord.serializer()), emptyList())
+    val usage = UsageLedger(usageStore)
     val ai = DefaultAiServices(settings, secrets, http, localStt = { localSpeech }, usage = usage)
     val meetingAi = MeetingAi(ai, settings)
     val speech = SpeechOutput(appContext, ai, settings)
@@ -136,10 +140,8 @@ class AppContainer(context: Context) {
     }
     val notes = NoteRepository(JsonDocumentStore(File(filesDir, "notes"), Note.serializer()) { it.id })
     /** Remembered voices (on-device voiceprints) for recognising people across meetings. */
-    val voices = VoiceLibrary(
-        JsonValueStore(File(filesDir, "voices.json"), ListSerializer(VoiceProfile.serializer()), emptyList()),
-        model = ModelCatalog.embedding.id,
-    )
+    private val voiceStore = JsonValueStore(File(filesDir, "voices.json"), ListSerializer(VoiceProfile.serializer()), emptyList())
+    val voices = VoiceLibrary(voiceStore, model = ModelCatalog.embedding.id)
     val pipeline = MeetingPipeline(
         meetings, ai, meetingAi, settings,
         voices = voices,
@@ -156,9 +158,10 @@ class AppContainer(context: Context) {
     /** What the app was opened to do from outside (a shared file, the tile or the widget). */
     val launches = LaunchRequests()
     /** "Ask across all meetings" and its conversation. */
+    private val askAllStore = JsonValueStore(File(filesDir, "ask-all.json"), ListSerializer(AskMessage.serializer()), emptyList())
     val libraryAsk = LibraryAsk(
         meetings,
-        JsonValueStore(File(filesDir, "ask-all.json"), ListSerializer(AskMessage.serializer()), emptyList()),
+        askAllStore,
         ai,
         settings,
         corpus = { searchIndex },
@@ -171,6 +174,19 @@ class AppContainer(context: Context) {
         // A meeting on the calendar right now gives the recording its title and invitees.
         if (calendar.enabled) scope.launch { calendar.eventNow()?.let { pipeline.attachCalendarEvent(meetingId, it) } }
     })
+
+    /** What the app stores, and deleting old recordings as the user chose. */
+    val storage = StorageManager(appContext, meetings, settings, jobs)
+
+    /** Encrypted backups of meetings, notes, voices and settings, and restoring them. */
+    val backups by lazy {
+        val version = runCatching { appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName }.getOrNull().orEmpty()
+        BackupManager(
+            appContext,
+            LibraryBackup(meetings, notes, settingsStore, voiceStore, askAllStore, usageStore, appVersion = version),
+            recorder, jobs, scope,
+        )
+    }
 
     /** True when on-device speaker detection is wanted but its models are not on the phone yet. */
     val speakerPackMissing: Boolean
@@ -213,6 +229,8 @@ class AppContainer(context: Context) {
             meetings.load()
             notes.load()
             recoverInterruptedMeetings()
+            // Recordings older than the user keeps them are deleted, keeping transcripts.
+            runCatching { storage.applyRetention() }.onFailure { Log.w("KaliScriber", "Couldn't delete old recordings", it) }
             // Voices saved with the previous speaker model are learned again once the new one is here.
             models.states.first { it[ModelCatalog.embedding.id] is ModelState.Ready }
             if (voices.outdated.isNotEmpty()) {
