@@ -50,6 +50,8 @@ data class Meeting(
     val interruptions: List<Interruption> = emptyList(),
     /** The summary format the user chose; null guesses it from the title (see [MeetingType.of]). */
     val type: MeetingType? = null,
+    /** Id of the user's own summary format, when they chose one (see [com.kaliscriber.core.ai.SummaryFormats]). */
+    val formatId: String? = null,
     /** When the recording was deleted to save space (the transcript and notes were kept). */
     val audioDeletedAt: Long? = null,
     /**
@@ -214,6 +216,8 @@ data class MeetingInsights(
     val sections: List<InsightSection> = emptyList(),
     /** The type the notes were written for. */
     val type: MeetingType? = null,
+    /** The name of the format the notes were written in. */
+    val format: String = "",
     val generatedAt: Long = 0,
 )
 

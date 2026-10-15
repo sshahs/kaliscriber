@@ -250,7 +250,7 @@ fun MeetingScreen(
                 }
             }
             when (tab) {
-                0 -> SummaryTab(m, busy, vm, onOpenTranscriptAt = { ms -> vm.player.seekTo(ms) }, onOpenMeeting = onOpenMeeting)
+                0 -> SummaryTab(m, busy, vm, onOpenTranscriptAt = { ms -> vm.player.seekTo(ms) }, onOpenMeeting = onOpenMeeting, onOpenFormats = { onOpenSettingsPage(SettingsPage.FORMATS) })
                 1 -> TranscriptTab(m, vm, focusSegmentId = focusSegmentId, onAskAboutSelection = {
                     vm.askAboutSelection()
                     tab = 2

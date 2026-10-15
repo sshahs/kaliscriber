@@ -10,6 +10,7 @@ import com.kaliscriber.app.storage.formatBytes
 import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.export.exportMessage
 import com.kaliscriber.app.speech.VoiceRecorder
+import com.kaliscriber.core.ai.CustomFormat
 import com.kaliscriber.core.ai.MeetingType
 import com.kaliscriber.core.ai.usage.UsageLedger
 import com.kaliscriber.core.ai.usage.UsageRecord
@@ -128,6 +129,17 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     /** Changes the summary format and writes the summary again in it. */
     fun setMeetingType(type: MeetingType?) = launchTask(Busy.INSIGHTS, background = true) {
         pipeline.setMeetingType(meetingId, type)
+        pipeline.generateInsights(meetingId)
+    }
+
+    /** The user's own summary formats, offered next to the built-in ones. */
+    val customFormats: StateFlow<List<CustomFormat>> = container.settingsStore.value
+        .map { it.customFormats }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), container.settings().customFormats)
+
+    /** Changes the summary to one of the user's own formats and writes it again. */
+    fun setCustomFormat(format: CustomFormat) = launchTask(Busy.INSIGHTS, background = true) {
+        pipeline.setCustomFormat(meetingId, format.id)
         pipeline.generateInsights(meetingId)
     }
     /** Runs the after-meeting AI steps again (names, glossary, summary, questions) after some failed. */

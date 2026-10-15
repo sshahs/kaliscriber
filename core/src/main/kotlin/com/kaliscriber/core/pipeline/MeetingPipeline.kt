@@ -774,7 +774,12 @@ class MeetingPipeline(
 
     /** Sets the meeting's summary format (null guesses it from the title). */
     suspend fun setMeetingType(meetingId: String, type: MeetingType?) {
-        repo.update(meetingId) { it.copy(type = type) }
+        repo.update(meetingId) { it.copy(type = type, formatId = null) }
+    }
+
+    /** Sets one of the user's own summary formats for the meeting. */
+    suspend fun setCustomFormat(meetingId: String, formatId: String) {
+        repo.update(meetingId) { it.copy(type = null, formatId = formatId) }
     }
 
         /** Sets how many people are in the meeting (null = detect automatically). */

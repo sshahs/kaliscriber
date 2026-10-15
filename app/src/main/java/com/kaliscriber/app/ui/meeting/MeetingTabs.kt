@@ -137,6 +137,8 @@ import com.kaliscriber.app.ui.common.StreamingAnswer
 import com.kaliscriber.app.ui.common.bookmarksByLine
 import com.kaliscriber.app.ui.recording.ExpectedSpeakersRow
 import com.kaliscriber.core.ai.MeetingType
+import com.kaliscriber.core.ai.CustomFormat
+import com.kaliscriber.core.ai.SummaryFormats
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
@@ -149,24 +151,42 @@ import java.io.File
 /** Parses "mm:ss" or "h:mm:ss" (optionally in brackets) into milliseconds. */
 /** The summary format, which the user can change; the summary is then written again. */
 @Composable
-private fun FormatRow(meeting: Meeting, enabled: Boolean, onPick: (MeetingType?) -> Unit) {
+private fun FormatRow(
+    meeting: Meeting,
+    custom: List<CustomFormat>,
+    enabled: Boolean,
+    onPick: (MeetingType?) -> Unit,
+    onPickCustom: (CustomFormat) -> Unit,
+    onMakeOwn: () -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
-    val current = MeetingType.of(meeting)
+    val current = SummaryFormats.of(meeting, custom)
+    val auto = !SummaryFormats.chosen(meeting, custom)
     Box {
         AssistChip(
             onClick = { open = true },
             enabled = enabled,
-            label = { Text("Format: ${current.label}" + if (meeting.type == null) " (auto)" else "") },
+            label = { Text("Format: ${current.label}" + if (auto) " (auto)" else "") },
             trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null, modifier = Modifier.size(18.dp)) },
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
-                text = { Text("Auto (${MeetingType.guess(meeting).label})") },
+                text = { Text("Auto (${SummaryFormats.guess(meeting, custom).label})") },
                 onClick = { open = false; onPick(null) },
             )
             MeetingType.entries.forEach { type ->
                 DropdownMenuItem(text = { Text(type.label) }, onClick = { open = false; onPick(type) })
             }
+            if (custom.isNotEmpty()) HorizontalDivider()
+            custom.forEach { format ->
+                DropdownMenuItem(text = { Text(format.name) }, onClick = { open = false; onPickCustom(format) })
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Make your own…") },
+                leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                onClick = { open = false; onMakeOwn() },
+            )
         }
     }
 }
@@ -199,8 +219,10 @@ fun SummaryTab(
     vm: MeetingViewModel,
     onOpenTranscriptAt: (Long) -> Unit,
     onOpenMeeting: (String) -> Unit = {},
+    onOpenFormats: () -> Unit = {},
 ) {
     val insights = meeting.insights
+    val customFormats by vm.customFormats.collectAsStateWithLifecycle()
     val since by vm.sinceLast.collectAsStateWithLifecycle()
     val talk = remember(meeting.segments, meeting.speakers) { TalkStats.of(meeting) }
     if (insights == null) {
@@ -336,7 +358,13 @@ fun SummaryTab(
     LazyColumn(state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "format") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                FormatRow(meeting, enabled = Busy.INSIGHTS !in busy, onPick = vm::setMeetingType)
+                FormatRow(
+                    meeting, customFormats,
+                    enabled = Busy.INSIGHTS !in busy,
+                    onPick = vm::setMeetingType,
+                    onPickCustom = vm::setCustomFormat,
+                    onMakeOwn = onOpenFormats,
+                )
                 if (Busy.INSIGHTS in busy) {
                     Spacer(Modifier.width(12.dp))
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)

@@ -159,8 +159,8 @@ class MeetingAi(
 
     suspend fun insights(meeting: Meeting, fromNotes: Boolean = false): MeetingInsights {
         requireTranscript(meeting)
-        val type = MeetingType.of(meeting)
-        val obj = meetingJson(meeting, Prompts.insightsTask(type), insightsSource(meeting, fromNotes))
+        val format = SummaryFormats.of(meeting, settings().customFormats)
+        val obj = meetingJson(meeting, Prompts.insightsTask(format), insightsSource(meeting, fromNotes))
         val previous = meeting.insights?.actionItems.orEmpty()
         return MeetingInsights(
             title = obj.str("title").orEmpty(),
@@ -198,7 +198,8 @@ class MeetingAi(
                 val sec = el as? JsonObject ?: return@mapNotNull null
                 InsightSection(sec.str("title", "name") ?: return@mapNotNull null, sec.strings("items", "points"))
             }.filter { it.items.isNotEmpty() },
-            type = type,
+            type = format.type,
+            format = format.label,
             generatedAt = clock.now(),
         )
     }

@@ -212,6 +212,8 @@ data class AppSettings(
     val weeklyRecap: Boolean = false,
     /** First-run setup was finished or closed, so it isn't opened by itself again. */
     val setupDone: Boolean = false,
+    /** Summary formats the user made, offered alongside the built-in ones. */
+    val customFormats: List<CustomFormat> = emptyList(),
 ) {
     fun settingsFor(id: ProviderId): ProviderSettings = providers[id] ?: ProviderSettings()
 

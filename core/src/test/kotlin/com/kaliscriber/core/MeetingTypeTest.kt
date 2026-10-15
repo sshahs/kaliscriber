@@ -1,6 +1,9 @@
 package com.kaliscriber.core
 
 import com.kaliscriber.core.ai.AppSettings
+import com.kaliscriber.core.ai.CustomFormat
+import com.kaliscriber.core.ai.FormatSection
+import com.kaliscriber.core.ai.SummaryFormats
 import com.kaliscriber.core.ai.MeetingAi
 import com.kaliscriber.core.ai.MeetingType
 import com.kaliscriber.core.ai.Prompts
@@ -52,5 +55,32 @@ class MeetingTypeTest {
 
         ai.insights(meeting("Budget review"))
         assertFalse(llm.requests.last().system.contains("\"sections\""), "general meetings keep the usual format")
+    }
+
+    @Test
+    fun `your own formats are guessed from their title words, chosen per meeting and used for the summary`() = runTest {
+        val tickets = CustomFormat(
+            "f1", "Ticket review", focus = "A weekly review of support tickets",
+            sections = listOf(FormatSection("Escalations", "tickets escalated and why"), FormatSection("Trends"), FormatSection(" ")),
+            titleWords = "tickets, support review",
+        )
+        val mine = listOf(tickets)
+        assertEquals("Ticket review", SummaryFormats.guess(meeting("Support review – week 42"), mine).label)
+        assertEquals("Ticket review", SummaryFormats.guess(meeting("Open tickets"), mine).label)
+        assertEquals(MeetingType.STANDUP, SummaryFormats.guess(meeting("Daily stand-up"), mine).type, "built-in guesses still work")
+        assertEquals(MeetingType.SALES_CALL, SummaryFormats.of(meeting("Open tickets").copy(type = MeetingType.SALES_CALL), mine).type, "a chosen built-in wins")
+        val chosen = meeting("Budget review").copy(formatId = "f1")
+        assertEquals("Ticket review", SummaryFormats.of(chosen, mine).label)
+        assertTrue(SummaryFormats.chosen(chosen, mine))
+        assertEquals(MeetingType.GENERAL, SummaryFormats.of(chosen, emptyList()).type, "a deleted format falls back to a guess")
+
+        val llm = FakeLlm { """{"title":"T","summary":"S.","sections":[{"title":"Escalations","items":["Acme outage"]}]}""" }
+        val ai = MeetingAi(FakeAi(llm, FakeStt(false) { SttResult(emptyList(), false) }), { AppSettings(customFormats = mine) })
+        val insights = ai.insights(chosen)
+        val system = llm.requests.single().system
+        assertTrue(system.contains("A weekly review of support tickets.") && system.contains("- \"Escalations\": tickets escalated and why") && system.contains("- \"Trends\"\n"), system)
+        assertFalse(system.contains("\" \""), "blank sections are left out")
+        assertEquals("Ticket review", insights.format)
+        assertEquals(null, insights.type)
     }
 }

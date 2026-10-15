@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.ListItem
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.activity.result.contract.ActivityResultContracts
@@ -116,6 +117,10 @@ enum class SettingsPage(val title: String, val summary: String, val keywords: Li
         "Recording & notes", "Microphone, audio clean-up, glossary and what happens after a meeting",
         listOf("microphone", "Bluetooth", "headset", "noise", "audio clean-up", "glossary", "names", "terms", "summary", "language", "headphone button", "bookmark", "speaker names", "running notes", "calendar"),
     ),
+    FORMATS(
+        "Summary formats", "Your own formats with the sections you want",
+        listOf("format", "template", "sections", "custom summary", "meeting type", "1:1", "stand-up", "sales call", "interview", "lecture"),
+    ),
     SEARCH("Smart search", "Find passages by meaning when asking across meetings", listOf("semantic", "meaning", "Ask all meetings", "search model")),
     REMINDERS("Reminders", "Daily action items and the weekly recap", listOf("notification", "daily", "tasks", "due", "weekly recap", "Friday")),
     EXPORT("Export destinations", "Email, Google Docs, Notion, AFFiNE and Baikal/CalDAV", listOf("email", "Google Docs", "Drive", "Notion", "AFFiNE", "Baikal", "CalDAV", "calendar", "tasks")),
@@ -135,6 +140,7 @@ private fun SettingsPage.icon(): ImageVector = when (this) {
     SettingsPage.AI -> Icons.Filled.AutoAwesome
     SettingsPage.SPEECH -> Icons.Filled.RecordVoiceOver
     SettingsPage.RECORDING -> Icons.Filled.Mic
+    SettingsPage.FORMATS -> Icons.Filled.ViewAgenda
     SettingsPage.SEARCH -> Icons.Filled.Search
     SettingsPage.REMINDERS -> Icons.Filled.Notifications
     SettingsPage.EXPORT -> Icons.Filled.IosShare
@@ -241,6 +247,7 @@ fun SettingsScreen(onBack: () -> Unit, initialPage: SettingsPage? = null) {
                     item { ProcessingSettings(settings, vm) }
                     item { GlossarySection(settings, vm) }
                 }
+                SettingsPage.FORMATS -> item { FormatsSection(settings, vm) }
                 SettingsPage.SEARCH -> item { SmartSearchSection(modelStates, vm) }
                 SettingsPage.REMINDERS -> item { ReminderSection(settings, vm) }
                 SettingsPage.EXPORT -> item { ExportSection(settings, vm) }

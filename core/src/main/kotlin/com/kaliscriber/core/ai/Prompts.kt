@@ -100,13 +100,19 @@ object Prompts {
     """.trimIndent()
 
     /** [INSIGHTS_TASK] for a kind of meeting: its focus, and the extra sections it needs. */
-    fun insightsTask(type: MeetingType): String {
-        if (type.sections.isEmpty()) return INSIGHTS_TASK
+    fun insightsTask(type: MeetingType): String = insightsTask(SummaryFormats.of(type))
+
+    /** [INSIGHTS_TASK] in a summary format: its focus, and the extra sections it needs. */
+    fun insightsTask(format: SummaryFormat): String {
+        if (format.sections.isEmpty() && format.focus.isBlank()) return INSIGHTS_TASK
+        if (format.sections.isEmpty()) return INSIGHTS_TASK + "\n" + format.focus
         return buildString {
             appendLine(INSIGHTS_TASK)
-            appendLine(type.focus)
+            if (format.focus.isNotBlank()) appendLine(format.focus)
             appendLine("Also add \"sections\" to the JSON object: [{\"title\": \"section title\", \"items\": [\"short point\"]}], with exactly these sections in this order:")
-            type.sections.forEach { (title, guidance) -> appendLine("- \"$title\": $guidance") }
+            format.sections.forEach { (title, guidance) ->
+                appendLine(if (guidance.isBlank()) "- \"$title\"" else "- \"$title\": $guidance")
+            }
             append("Leave a section's items empty if the meeting didn't cover it.")
         }
     }
