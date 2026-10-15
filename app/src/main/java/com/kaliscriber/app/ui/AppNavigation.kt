@@ -19,12 +19,14 @@ import com.kaliscriber.app.ui.notes.NoteScreen
 import com.kaliscriber.app.ui.people.PersonScreen
 import com.kaliscriber.app.ui.recap.RecapScreen
 import com.kaliscriber.app.ui.recording.RecordingScreen
+import com.kaliscriber.app.ui.settings.SettingsPage
 import com.kaliscriber.app.ui.settings.SettingsScreen
 
 object Routes {
     const val HOME = "home"
     const val RECORDING = "recording"
-    const val SETTINGS = "settings"
+    const val SETTINGS = "settings?page={page}"
+    fun settings(page: SettingsPage? = null) = "settings" + (page?.let { "?page=${it.name}" } ?: "")
     const val MEETING = "meeting/{id}?tab={tab}&seg={seg}"
     const val NOTE = "note/{id}"
     const val ASK_ALL = "ask-all?q={q}"
@@ -64,7 +66,7 @@ fun AppNavigation(openTasks: Boolean = false) {
                 onOpenMeeting = { nav.navigate(Routes.meeting(it)) },
                 onOpenNote = { nav.navigate(Routes.note(it)) },
                 onOpenRecording = { nav.navigate(Routes.RECORDING) { launchSingleTop = true } },
-                onOpenSettings = { nav.navigate(Routes.SETTINGS) },
+                onOpenSettings = { nav.navigate(Routes.settings()) },
                 onOpenMeetingAt = { id, segmentId -> nav.navigate(Routes.meeting(id, tab = if (segmentId != null) 1 else 0, segmentId = segmentId)) },
                 onAskAll = { nav.navigate(Routes.askAll(it)) },
                 onOpenPerson = { nav.navigate(Routes.person(it)) },
@@ -87,6 +89,7 @@ fun AppNavigation(openTasks: Boolean = false) {
             AskAllScreen(
                 initialQuestion = entry.arguments?.getString("q"),
                 onBack = { nav.popBackStack() },
+                onOpenSettings = { nav.navigate(Routes.settings(it)) },
                 onOpenSource = { source ->
                     nav.navigate(Routes.meeting(source.meetingId, tab = if (source.segmentId != null) 1 else 0, segmentId = source.segmentId))
                 },
@@ -101,8 +104,12 @@ fun AppNavigation(openTasks: Boolean = false) {
                 },
             )
         }
-        composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { nav.popBackStack() })
+        composable(
+            Routes.SETTINGS,
+            arguments = listOf(navArgument("page") { type = NavType.StringType; nullable = true; defaultValue = null }),
+        ) { entry ->
+            val page = entry.arguments?.getString("page")?.let { name -> SettingsPage.entries.firstOrNull { it.name == name } }
+            SettingsScreen(onBack = { nav.popBackStack() }, initialPage = page)
         }
         composable(
             Routes.MEETING,
@@ -126,7 +133,8 @@ fun AppNavigation(openTasks: Boolean = false) {
                 focusSegmentId = entry.arguments?.getString("seg"),
                 onBack = { nav.popBackStack() },
                 onOpenNote = { nav.navigate(Routes.note(it)) },
-                onOpenSettings = { nav.navigate(Routes.SETTINGS) },
+                onOpenSettings = { nav.navigate(Routes.settings()) },
+                onOpenSettingsPage = { nav.navigate(Routes.settings(it)) },
             )
         }
         composable(Routes.NOTE, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->

@@ -123,6 +123,10 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         pipeline.setMeetingType(meetingId, type)
         pipeline.generateInsights(meetingId)
     }
+    /** Runs the after-meeting AI steps again (names, glossary, summary, questions) after some failed. */
+    fun retryAnalysis() = launchTask(Busy.INSIGHTS, "Notes written again", background = true) {
+        pipeline.analyze(meetingId, aiSeparation = false)
+    }
     fun generateGaps() = launchTask(Busy.GAPS, background = true) { pipeline.generateGaps(meetingId) }
     fun refreshWithAnswers() = launchTask(Busy.INSIGHTS, "Summary updated with your answers", background = true) { pipeline.refreshWithAnswers(meetingId) }
     fun separateSpeakers() = launchTask(Busy.SPEAKERS, "Speakers re-detected", background = true) { pipeline.redetectSpeakers(meetingId, aiOnly = true) }

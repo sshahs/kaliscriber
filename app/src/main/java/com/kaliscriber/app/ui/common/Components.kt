@@ -2,6 +2,10 @@
 
 package com.kaliscriber.app.ui.common
 
+import androidx.compose.material3.TextButton
+import com.kaliscriber.app.ui.settings.SettingsPage
+import com.kaliscriber.core.ai.ErrorFixes
+import com.kaliscriber.core.ai.ErrorFix
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
@@ -290,4 +294,28 @@ fun shareText(context: Context, subject: String, text: String) {
         putExtra(Intent.EXTRA_TEXT, text)
     }
     context.startActivity(Intent.createChooser(send, "Share").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+/** Where an error's fix lives in Settings; null when trying again is the fix. */
+fun ErrorFix.page(): SettingsPage? = when (this) {
+    ErrorFix.API_KEY, ErrorFix.MODEL, ErrorFix.CREDIT -> SettingsPage.AI
+    ErrorFix.SPEECH_MODEL -> SettingsPage.SPEECH
+    ErrorFix.CONNECTION -> null
+}
+
+fun ErrorFix.label(): String = when (this) {
+    ErrorFix.API_KEY -> "Open AI settings"
+    ErrorFix.MODEL -> "Check the model"
+    ErrorFix.SPEECH_MODEL -> "Download a speech model"
+    ErrorFix.CREDIT -> "Check credit or switch provider"
+    ErrorFix.CONNECTION -> "Try again"
+}
+
+/** The way out of an error: opens the right Settings page, or tries again. Nothing if neither helps. */
+@Composable
+fun ErrorFixButton(message: String?, onOpenSettings: (SettingsPage) -> Unit, onRetry: (() -> Unit)? = null) {
+    val fix = ErrorFixes.of(message) ?: return
+    val page = fix.page()
+    if (page == null && onRetry == null) return
+    TextButton(onClick = { if (page != null) onOpenSettings(page) else onRetry?.invoke() }) { Text(fix.label()) }
 }

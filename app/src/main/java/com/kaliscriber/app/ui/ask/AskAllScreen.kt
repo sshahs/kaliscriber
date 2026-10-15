@@ -2,6 +2,8 @@
 
 package com.kaliscriber.app.ui.ask
 
+import com.kaliscriber.app.ui.common.ErrorFixButton
+import com.kaliscriber.app.ui.settings.SettingsPage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,6 +111,8 @@ fun AskAllScreen(
     initialQuestion: String?,
     onBack: () -> Unit,
     onOpenSource: (AskSource) -> Unit,
+    /** Opens the Settings page where an error's fix is. */
+    onOpenSettings: (SettingsPage) -> Unit = {},
 ) {
     val vm = appViewModel { AskAllViewModel(it) }
     val messages by vm.messages.collectAsStateWithLifecycle()
@@ -178,7 +182,7 @@ fun AskAllScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(messages, key = { it.id }) { message -> MessageBubble(message, onOpenSource) }
+                    items(messages, key = { it.id }) { message -> MessageBubble(message, onOpenSource, onOpenSettings) }
                     if (thinking) {
                         item {
                             if (partial != null) {
@@ -215,7 +219,7 @@ fun AskAllScreen(
 }
 
 @Composable
-private fun MessageBubble(message: AskMessage, onOpenSource: (AskSource) -> Unit) {
+private fun MessageBubble(message: AskMessage, onOpenSource: (AskSource) -> Unit, onOpenSettings: (SettingsPage) -> Unit = {}) {
     val mine = message.role == ChatRole.USER
     Box(Modifier.fillMaxWidth(), contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
         Surface(
@@ -230,6 +234,7 @@ private fun MessageBubble(message: AskMessage, onOpenSource: (AskSource) -> Unit
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (mine || message.isError) {
                     Text(message.content, style = MaterialTheme.typography.bodyMedium)
+                    if (message.isError) ErrorFixButton(message.content, onOpenSettings = onOpenSettings)
                 } else {
                     SelectionContainer { MarkdownText(message.content) }
                     if (message.stopped) StoppedLabel()

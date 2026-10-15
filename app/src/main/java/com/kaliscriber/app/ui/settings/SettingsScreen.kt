@@ -8,6 +8,16 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.ListItem
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
@@ -92,21 +102,68 @@ import com.kaliscriber.core.ai.usage.TokenUsage
 import com.kaliscriber.core.ai.usage.UsageLedger
 import kotlin.math.roundToInt
 
+/** The pages Settings is split into; [keywords] let the search box find what is on each. */
+enum class SettingsPage(val title: String, val summary: String, val keywords: List<String>) {
+    AI(
+        "AI services", "Models, API keys, the quick model, usage and cost",
+        listOf("provider", "API key", "model", "OpenAI", "Claude", "Anthropic", "Gemini", "Ollama", "Command Code", "DeepSeek", "Groq", "ElevenLabs", "quick model", "usage", "cost", "price", "tokens", "voice", "read aloud", "transcription", "thinking effort", "zero data retention"),
+    ),
+    SPEECH(
+        "Speech & voices", "On-device transcription, speaker detection and voice memory",
+        listOf("Parakeet", "Whisper", "SenseVoice", "speech model", "download", "speaker detection", "voice memory", "saved voices", "voiceprint"),
+    ),
+    RECORDING(
+        "Recording & notes", "Microphone, audio clean-up, glossary and what happens after a meeting",
+        listOf("microphone", "Bluetooth", "headset", "noise", "audio clean-up", "glossary", "names", "terms", "summary", "language", "headphone button", "bookmark", "speaker names", "running notes", "calendar"),
+    ),
+    SEARCH("Smart search", "Find passages by meaning when asking across meetings", listOf("semantic", "meaning", "Ask all meetings", "search model")),
+    REMINDERS("Reminders", "Daily action items and the weekly recap", listOf("notification", "daily", "tasks", "due", "weekly recap", "Friday")),
+    EXPORT("Export destinations", "Email, Google Docs, Notion, AFFiNE and Baikal/CalDAV", listOf("email", "Google Docs", "Drive", "Notion", "AFFiNE", "Baikal", "CalDAV", "calendar", "tasks")),
+    DATA("Data & storage", "Space used, keeping recordings, backup and restore", listOf("storage", "space", "delete recordings", "keep recordings", "backup", "restore", "password")),
+    ;
+
+    /** What on this page matches [query], or null if nothing does. */
+    fun match(query: String): String? {
+        val q = query.trim()
+        if (q.isEmpty()) return summary
+        if (title.contains(q, true) || summary.contains(q, true)) return summary
+        return keywords.firstOrNull { it.contains(q, true) || q.contains(it, true) }?.let { "Includes: ${it.replaceFirstChar(Char::uppercase)}" }
+    }
+}
+
+private fun SettingsPage.icon(): ImageVector = when (this) {
+    SettingsPage.AI -> Icons.Filled.AutoAwesome
+    SettingsPage.SPEECH -> Icons.Filled.RecordVoiceOver
+    SettingsPage.RECORDING -> Icons.Filled.Mic
+    SettingsPage.SEARCH -> Icons.Filled.Search
+    SettingsPage.REMINDERS -> Icons.Filled.Notifications
+    SettingsPage.EXPORT -> Icons.Filled.IosShare
+    SettingsPage.DATA -> Icons.Filled.Storage
+}
+
+/** Settings: a short list of pages with a search box, or one page when [initialPage] is given. */
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, initialPage: SettingsPage? = null) {
     val vm = appViewModel { SettingsViewModel(it) }
     val settings by vm.settings.collectAsStateWithLifecycle()
     val keys by vm.configuredKeys.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val modelStates by vm.modelStates.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
+    var page by rememberSaveable { mutableStateOf(initialPage) }
+    var query by rememberSaveable { mutableStateOf("") }
+    // Opened on a page directly (from an error or setup), Back leaves Settings.
+    val pageIsRoot = initialPage != null
+    BackHandler(enabled = page != null && !pageIsRoot) { page = null }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text(page?.title ?: "Settings") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = { if (page != null && !pageIsRoot) page = null else onBack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
                 },
             )
         },
@@ -116,45 +173,81 @@ fun SettingsScreen(onBack: () -> Unit) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { ActiveServices(settings, keys, vm) }
-            item { LocalSpeechSection(settings, modelStates, vm) }
-            item { VoiceMemorySection(settings, modelStates, vm) }
-            item { SmartSearchSection(modelStates, vm) }
-            item { UsageSection(settings, vm) }
-            item { ReminderSection(settings, vm) }
-            item { GlossarySection(settings, vm) }
-            item {
-                Column {
-                    Text("Providers & API keys", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-                    Text(
-                        "Bring your own keys. They are encrypted with the Android Keystore and only sent to the provider they belong to.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            when (page) {
+                null -> {
+                    item {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            placeholder = { Text("Search settings") },
+                            leadingIcon = { Icon(Icons.Filled.Search, null) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    val found = SettingsPage.entries.mapNotNull { p -> p.match(query)?.let { p to it } }
+                    if (found.isEmpty()) {
+                        item { Text("Nothing in Settings matches \"${query.trim()}\".", style = MaterialTheme.typography.bodyMedium) }
+                    }
+                    items(found, key = { it.first.name }) { (p, line) ->
+                        Card(Modifier.fillMaxWidth().clickable { page = p }) {
+                            ListItem(
+                                headlineContent = { Text(p.title) },
+                                supportingContent = { Text(line) },
+                                leadingContent = { Icon(p.icon(), null, tint = MaterialTheme.colorScheme.primary) },
+                                trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
+                            )
+                        }
+                    }
+                    item {
+                        Text(
+                            "Privacy: recordings, transcripts and notes stay on this device. Audio and text are sent only to the AI services you choose, using your keys.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        )
+                    }
                 }
-            }
-            items(ProviderId.entries.filter { it != ProviderId.LOCAL }, key = { it.name }) { id ->
-                ProviderCard(
-                    id = id,
-                    settings = settings,
-                    hasKey = id in keys,
-                    status = status[id],
-                    expanded = expanded == id.name,
-                    onToggle = { expanded = if (expanded == id.name) null else id.name },
-                    vm = vm,
-                )
-            }
-            item { ExportSection(settings, vm) }
-            item { ProcessingSettings(settings, vm) }
-            item { StorageSection(settings, vm) }
-            item { BackupSection(vm) }
-            item {
-                Text(
-                    "Privacy: recordings, transcripts and notes stay on this device. Audio and text are sent only to the AI services you select above, using your keys.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 8.dp),
-                )
+                SettingsPage.AI -> {
+                    item { ActiveServices(settings, keys, vm) }
+                    item { UsageSection(settings, vm) }
+                    item {
+                        Column {
+                            Text("Providers & API keys", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+                            Text(
+                                "Bring your own keys. They are encrypted with the Android Keystore and only sent to the provider they belong to.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    items(ProviderId.entries.filter { it != ProviderId.LOCAL }, key = { it.name }) { id ->
+                        ProviderCard(
+                            id = id,
+                            settings = settings,
+                            hasKey = id in keys,
+                            status = status[id],
+                            expanded = expanded == id.name,
+                            onToggle = { expanded = if (expanded == id.name) null else id.name },
+                            vm = vm,
+                        )
+                    }
+                }
+                SettingsPage.SPEECH -> {
+                    item { LocalSpeechSection(settings, modelStates, vm) }
+                    item { VoiceMemorySection(settings, modelStates, vm) }
+                }
+                SettingsPage.RECORDING -> {
+                    item { ProcessingSettings(settings, vm) }
+                    item { GlossarySection(settings, vm) }
+                }
+                SettingsPage.SEARCH -> item { SmartSearchSection(modelStates, vm) }
+                SettingsPage.REMINDERS -> item { ReminderSection(settings, vm) }
+                SettingsPage.EXPORT -> item { ExportSection(settings, vm) }
+                SettingsPage.DATA -> {
+                    item { StorageSection(settings, vm) }
+                    item { BackupSection(vm) }
+                }
             }
         }
     }

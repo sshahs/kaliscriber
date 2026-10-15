@@ -91,7 +91,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.export.GoogleAuth
+import com.kaliscriber.app.ui.common.ErrorFixButton
+import com.kaliscriber.app.ui.common.label
+import com.kaliscriber.app.ui.common.page
 import com.kaliscriber.app.ui.common.shareText
+import com.kaliscriber.app.ui.settings.SettingsPage
+import com.kaliscriber.core.ai.ErrorFix
+import com.kaliscriber.core.ai.ErrorFixes
 import com.kaliscriber.core.ai.usage.TokenUsage
 import com.kaliscriber.core.ai.usage.UsageRecord
 import com.kaliscriber.core.model.Meeting
@@ -110,6 +116,8 @@ fun MeetingScreen(
     onBack: () -> Unit,
     onOpenNote: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    /** Opens one page of Settings, where an error's fix is. */
+    onOpenSettingsPage: (SettingsPage) -> Unit = { onOpenSettings() },
 ) {
     val vm = appViewModel(key = "meeting-$meetingId") { MeetingViewModel(it, meetingId) }
     val meeting by vm.meeting.collectAsStateWithLifecycle()
@@ -124,7 +132,14 @@ fun MeetingScreen(
     var showTimeline by remember { mutableStateOf(false) }
     val recordingPending by vm.recordingPending.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) {
+        vm.messages.collect { message ->
+            // An error whose fix is in Settings gets a button that goes there.
+            val page = ErrorFixes.of(message)?.page()
+            val result = snackbar.showSnackbar(message, actionLabel = page?.let { ErrorFixes.of(message)?.label() }, withDismissAction = page == null)
+            if (result == SnackbarResult.ActionPerformed && page != null) onOpenSettingsPage(page)
+        }
+    }
     LaunchedEffect(Unit) {
         vm.undoables.collect { done ->
             val result = snackbar.showSnackbar(done.message, actionLabel = "Undo", duration = SnackbarDuration.Short)
@@ -205,7 +220,7 @@ fun MeetingScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            StatusBanner(m, busy, onRetry = vm::retryPending)
+            StatusBanner(m, busy, onRetry = vm::retryPending, onRetryAnalysis = vm::retryAnalysis, onOpenSettings = onOpenSettingsPage)
             if (m.status == MeetingStatus.RECORDING) {
                 Text(
                     "Recording in progress. Ask AI works on the transcript so far.",
@@ -238,7 +253,7 @@ fun MeetingScreen(
                     vm.askAboutSelection()
                     tab = 2
                 })
-                2 -> AskTab(m, busy, vm)
+                2 -> AskTab(m, busy, vm, onOpenSettings = onOpenSettingsPage)
                 else -> GapsTab(m, busy, vm, onAsk = { question ->
                     vm.ask(question)
                     tab = 2
@@ -416,7 +431,13 @@ private fun ExportSheet(
 }
 
 @Composable
-private fun StatusBanner(meeting: Meeting, busy: Set<Busy>, onRetry: () -> Unit) {
+private fun StatusBanner(
+    meeting: Meeting,
+    busy: Set<Busy>,
+    onRetry: () -> Unit,
+    onRetryAnalysis: () -> Unit,
+    onOpenSettings: (SettingsPage) -> Unit,
+) {
     val working = when (meeting.status) {
         MeetingStatus.RECORDING -> "Recording in progress…"
         MeetingStatus.TRANSCRIBING -> "Transcribing and detecting speakers…"
@@ -457,9 +478,16 @@ private fun StatusBanner(meeting: Meeting, busy: Set<Busy>, onRetry: () -> Unit)
         ) {
             Column(Modifier.padding(12.dp)) {
                 Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
-                if (meeting.pendingChunks.isNotEmpty()) {
-                    TextButton(onClick = onRetry, enabled = Busy.RETRY !in busy) {
-                        Text("Retry ${meeting.pendingChunks.size} untranscribed part(s)")
+                val retry: () -> Unit = if (meeting.pendingChunks.isNotEmpty()) onRetry else onRetryAnalysis
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // The fix for what went wrong (a key, a model, the connection), then trying again.
+                    ErrorFixButton(error, onOpenSettings = onOpenSettings, onRetry = retry)
+                    if (meeting.pendingChunks.isNotEmpty()) {
+                        TextButton(onClick = onRetry, enabled = Busy.RETRY !in busy) {
+                            Text("Retry ${meeting.pendingChunks.size} untranscribed part(s)")
+                        }
+                    } else if (meeting.hasTranscript && ErrorFixes.of(error) != ErrorFix.CONNECTION) {
+                        TextButton(onClick = onRetryAnalysis, enabled = Busy.INSIGHTS !in busy) { Text("Try again") }
                     }
                 }
             }

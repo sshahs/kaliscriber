@@ -2,7 +2,32 @@
 
 package com.kaliscriber.app.ui.recording
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import kotlin.math.sqrt
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,15 +52,12 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -199,47 +221,155 @@ fun RecordingScreen(onBack: () -> Unit, onAskAi: (String) -> Unit, onFinished: (
 
 @Composable
 private fun RecorderHeader(state: RecordingState.Recording, onPause: () -> Unit, onStop: () -> Unit, onMark: () -> Unit) {
-    val level by animateFloatAsState(state.level, label = "level")
+    val haptics = LocalHapticFeedback.current
+    // The screen stays on while it shows a recording, so the time and transcript can be glanced at.
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
             TranscriptFormatter.timestamp(state.elapsedMs),
-            style = MaterialTheme.typography.displayMedium,
+            style = MaterialTheme.typography.displayLarge.copy(fontFeatureSettings = "tnum"),
+            color = if (state.paused) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center,
         )
-        LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(6.dp))
-        state.micNote?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Text(
             when {
                 state.paused -> "Paused"
                 state.queuedChunks > 0 -> "Listening · transcribing ${state.queuedChunks} part(s)…"
-                else -> "Listening · transcript updates every few seconds"
+                else -> "Listening · the transcript updates every few seconds"
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = onPause) {
+        Waveform(state.level, state.paused, Modifier.fillMaxWidth().height(64.dp))
+        state.micNote?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        FilledTonalButton(
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onMark()
+            },
+            enabled = !state.paused,
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+        ) {
+            Icon(Icons.Filled.BookmarkAdd, null)
+            Spacer(Modifier.width(10.dp))
+            Text("Mark this moment", style = MaterialTheme.typography.titleMedium)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = onPause, modifier = Modifier.weight(1f).height(56.dp)) {
                 Icon(if (state.paused) Icons.Filled.PlayArrow else Icons.Filled.Pause, null)
                 Spacer(Modifier.width(8.dp))
                 Text(if (state.paused) "Resume" else "Pause")
             }
-            FilledTonalButton(onClick = onMark, enabled = !state.paused) {
-                Icon(Icons.Filled.BookmarkAdd, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Mark")
-            }
-            Button(onClick = onStop, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
-                Icon(Icons.Filled.Stop, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Stop & analyse")
-            }
+            HoldToStop(onStop, Modifier.weight(1.4f))
         }
     }
 }
+
+/** The input level over the last few seconds, as bars that scroll from right to left. */
+@Composable
+private fun Waveform(level: Float, paused: Boolean, modifier: Modifier = Modifier) {
+    val latest by rememberUpdatedState(if (paused) 0f else level)
+    val bars = remember { mutableStateListOf<Float>() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            bars.add(latest.coerceIn(0f, 1f))
+            while (bars.size > WAVE_BARS) bars.removeAt(0)
+            delay(WAVE_STEP_MS)
+        }
+    }
+    val color = if (paused) MaterialTheme.colorScheme.outlineVariant else MaterialTheme.colorScheme.primary
+    Canvas(modifier.semantics { contentDescription = if (paused) "Paused" else "Sound level" }) {
+        val step = size.width / WAVE_BARS
+        val minimum = 2.dp.toPx()
+        bars.forEachIndexed { i, value ->
+            val height = maxOf(minimum, sqrt(value) * size.height)
+            val x = (WAVE_BARS - bars.size + i) * step + step / 2
+            drawLine(
+                color,
+                Offset(x, (size.height - height) / 2),
+                Offset(x, (size.height + height) / 2),
+                strokeWidth = step * 0.6f,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+}
+
+/**
+ * Stop needs a press of about a second, so a stray tap can't end the meeting. Screen readers get
+ * a plain Stop action.
+ */
+@Composable
+private fun HoldToStop(onStop: () -> Unit, modifier: Modifier = Modifier) {
+    val progress = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    var hint by remember { mutableStateOf(false) }
+    var stopped by remember { mutableStateOf(false) }
+    fun stop() {
+        if (stopped) return
+        stopped = true
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        onStop()
+    }
+    Box(
+        modifier
+            .height(56.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    hint = false
+                    val hold = scope.launch {
+                        progress.animateTo(1f, tween(HOLD_TO_STOP_MS, easing = LinearEasing))
+                        stop()
+                    }
+                    tryAwaitRelease()
+                    if (progress.value < 1f) {
+                        hold.cancel()
+                        hint = true
+                        scope.launch { progress.animateTo(0f) }
+                    }
+                })
+            }
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                onClick(label = "Stop and write the notes") {
+                    stop()
+                    true
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.matchParentSize().padding(end = 0.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(progress.value).background(MaterialTheme.colorScheme.error.copy(alpha = 0.45f)))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Stop, null, tint = MaterialTheme.colorScheme.onErrorContainer)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (hint) "Keep holding to stop" else "Hold to stop",
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+    }
+}
+
+private const val WAVE_BARS = 60
+private const val WAVE_STEP_MS = 100L
+private const val HOLD_TO_STOP_MS = 900
 
 /** "How many people?" picker; a known count makes speaker detection more accurate. */
 @Composable

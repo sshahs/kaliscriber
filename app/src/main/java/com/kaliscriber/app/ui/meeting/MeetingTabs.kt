@@ -121,6 +121,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaliscriber.app.ui.common.BookmarkMarker
+import com.kaliscriber.app.ui.common.ErrorFixButton
+import com.kaliscriber.app.ui.common.page
+import com.kaliscriber.app.ui.settings.SettingsPage
+import com.kaliscriber.core.ai.ErrorFixes
 import com.kaliscriber.app.ui.common.BulletList
 import com.kaliscriber.app.ui.common.EmptyState
 import com.kaliscriber.app.ui.common.MarkdownText
@@ -842,7 +846,7 @@ private fun EditSegmentDialog(segment: TranscriptSegment, onDismiss: () -> Unit,
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
+fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenSettings: (SettingsPage) -> Unit = {}) {
     val excerpt by vm.excerpt.collectAsStateWithLifecycle()
     val speaking by vm.speaking.collectAsStateWithLifecycle()
     val voicePhase by vm.voicePhase.collectAsStateWithLifecycle()
@@ -931,10 +935,15 @@ fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
                                 if (mine || message.isError) {
                                     Text(message.content, style = MaterialTheme.typography.bodyMedium)
                                     if (message.isError && message.id == meeting.chat.lastOrNull()?.id) {
-                                        TextButton(onClick = { vm.retryFailedAnswer(message.id) }, enabled = !thinking) {
-                                            Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(16.dp))
-                                            Spacer(Modifier.width(4.dp))
-                                            Text("Try again")
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (ErrorFixes.of(message.content)?.page() != null) {
+                                                ErrorFixButton(message.content, onOpenSettings = onOpenSettings)
+                                            }
+                                            TextButton(onClick = { vm.retryFailedAnswer(message.id) }, enabled = !thinking) {
+                                                Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("Try again")
+                                            }
                                         }
                                     }
                                 } else {
