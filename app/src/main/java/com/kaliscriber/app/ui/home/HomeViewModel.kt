@@ -24,20 +24,50 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import com.kaliscriber.core.ai.MeetingType
+import com.kaliscriber.core.library.MeetingList
+import com.kaliscriber.core.tasks.ActionItems
+import java.time.LocalDate
 import kotlinx.coroutines.withContext
 
 class HomeViewModel(private val container: AppContainer) : ViewModel() {
 
     val query = MutableStateFlow("")
 
-    val meetings: StateFlow<List<Meeting>> = combine(container.meetings.meetings, query) { list, q ->
+    /** What the meeting list is narrowed to (needs attention, a person, a format). */
+    val filter = MutableStateFlow(MeetingList.Filter())
+
+    /** Meetings and notes deleted a moment ago, hidden while their deletion can still be undone. */
+    private val pendingDeletes = MutableStateFlow<Set<String>>(emptySet())
+    private val deleteJobs = HashMap<String, Job>()
+
+    val meetings: StateFlow<List<Meeting>> = combine(container.meetings.meetings, query, filter, pendingDeletes) { list, q, f, hidden ->
         // Transcripts are searched through the index (see searchResults).
-        if (q.isBlank()) list else list.filter { m ->
+        val visible = MeetingList.filter(list.filterNot { it.id in hidden }, f)
+        if (q.isBlank()) visible else visible.filter { m ->
             m.title.contains(q, true) ||
                 m.insights?.summary?.contains(q, true) == true ||
                 m.speakers.any { it.name.contains(q, true) }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** People and summary formats to filter by. */
+    val people: StateFlow<List<String>> = container.meetings.meetings.map { MeetingList.people(it) }
+        .flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val types: StateFlow<List<MeetingType>> = container.meetings.meetings.map { MeetingList.types(it) }
+        .flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Whether any meeting exists at all (filters and search aside). */
+    val hasMeetings: StateFlow<Boolean> = container.meetings.meetings.map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Open action items overdue or due today, for the Tasks badge. */
+    val dueTasks: StateFlow<Int> = container.meetings.meetings.map { list ->
+        ActionItems.digest(list, LocalDate.now()).let { it.overdue.size + it.dueToday.size }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     /** Meetings matching the search box, with the lines that matched; empty when it is blank. */
     @OptIn(FlowPreview::class)
@@ -45,8 +75,9 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         if (q.isBlank()) emptyList() else withContext(Dispatchers.IO) { MeetingSearch.search(list, container.searchIndex, q) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val notes: StateFlow<List<Note>> = combine(container.notes.notes, query) { list, q ->
-        if (q.isBlank()) list else list.filter { it.title.contains(q, true) || it.content.contains(q, true) }
+    val notes: StateFlow<List<Note>> = combine(container.notes.notes, query, pendingDeletes) { list, q, hidden ->
+        val visible = list.filterNot { it.id in hidden }
+        if (q.isBlank()) visible else visible.filter { it.title.contains(q, true) || it.content.contains(q, true) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val recording: StateFlow<RecordingState> = container.recorder.state
@@ -78,9 +109,29 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
 
     suspend fun createNote(): String = container.notes.create().id
 
-    fun deleteMeeting(id: String) = viewModelScope.launch { container.meetings.delete(id) }
+    /**
+     * Hides a meeting or note at once and deletes it after [UNDO_MS] unless [undoDelete] is called.
+     * The deletion runs in the app's scope, so leaving the screen doesn't cancel it.
+     */
+    fun deleteLater(id: String, isNote: Boolean) {
+        pendingDeletes.update { it + id }
+        deleteJobs.remove(id)?.cancel()
+        deleteJobs[id] = container.scope.launch {
+            delay(UNDO_MS)
+            if (isNote) container.notes.delete(id) else container.meetings.delete(id)
+            pendingDeletes.update { it - id }
+        }
+    }
 
-    fun deleteNote(id: String) = viewModelScope.launch { container.notes.delete(id) }
+    fun undoDelete(id: String) {
+        deleteJobs.remove(id)?.cancel()
+        pendingDeletes.update { it - id }
+    }
+
+    private companion object {
+        /** Longer than the snackbar offering Undo is shown. */
+        const val UNDO_MS = 6_000L
+    }
 
     /** Copies the picked audio into app storage and transcribes it in the background. */
     suspend fun importAudio(uri: Uri): Result<String> = runCatching { container.importer.import(uri) }
