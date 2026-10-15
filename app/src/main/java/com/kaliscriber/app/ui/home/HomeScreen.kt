@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Event
@@ -99,6 +100,7 @@ fun HomeScreen(
     /** Opens "Ask all meetings", optionally asking [question] straight away. */
     onAskAll: (question: String?) -> Unit = {},
     onOpenPerson: (String) -> Unit = {},
+    onOpenRecap: () -> Unit = {},
     startTab: Int = 0,
 ) {
     val vm = appViewModel { HomeViewModel(it) }
@@ -163,6 +165,9 @@ fun HomeScreen(
                 actions = {
                     IconButton(onClick = { onAskAll(null) }) {
                         Icon(Icons.Filled.QuestionAnswer, contentDescription = "Ask all meetings")
+                    }
+                    IconButton(onClick = onOpenRecap) {
+                        Icon(Icons.Filled.DateRange, contentDescription = "Weekly recap")
                     }
                     IconButton(onClick = { importer.launch(arrayOf("audio/*", "video/mp4")) }) {
                         Icon(Icons.Filled.AudioFile, contentDescription = "Import audio")

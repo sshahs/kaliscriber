@@ -516,7 +516,10 @@ private fun ReminderSection(settings: AppSettings, vm: SettingsViewModel) {
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         vm.update { it.copy(taskReminders = granted) }
     }
-    SectionCard("Action item reminders") {
+    val recapPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        vm.update { it.copy(weeklyRecap = granted) }
+    }
+    SectionCard("Reminders") {
         Text(
             "A daily notification listing action items that are overdue or due that day. Find all of them under Tasks on the home screen.",
             style = MaterialTheme.typography.bodySmall,
@@ -536,6 +539,15 @@ private fun ReminderSection(settings: AppSettings, vm: SettingsViewModel) {
                 onSelect = { hour -> vm.update { it.copy(reminderHour = hour) } },
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+        ToggleRow(
+            "Weekly recap on Fridays",
+            "At 4 pm the AI recaps the week's meetings: decisions, open items and what to follow up. Also under the calendar icon on the home screen.",
+            settings.weeklyRecap,
+        ) { on ->
+            val needsPermission = on && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            if (needsPermission) recapPermission.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.update { it.copy(weeklyRecap = on) }
         }
     }
 }

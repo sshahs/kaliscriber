@@ -206,6 +206,8 @@ data class AppSettings(
     val taskReminders: Boolean = true,
     /** Hour of the day (0-23) the reminder is shown. */
     val reminderHour: Int = 9,
+    /** A recap of the week's meetings, written and shown as a notification on Friday afternoons. */
+    val weeklyRecap: Boolean = false,
 ) {
     fun settingsFor(id: ProviderId): ProviderSettings = providers[id] ?: ProviderSettings()
 

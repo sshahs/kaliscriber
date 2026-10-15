@@ -11,6 +11,9 @@ sealed interface LaunchRequest {
 
     /** Start recording (Quick Settings tile, home-screen widget). */
     data object Record : LaunchRequest
+
+    /** Show the weekly recap (its Friday notification). */
+    data object OpenRecap : LaunchRequest
 }
 
 /** The pending [LaunchRequest], held until a screen acts on it. */

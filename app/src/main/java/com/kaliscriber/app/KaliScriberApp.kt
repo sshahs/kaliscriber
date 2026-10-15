@@ -23,8 +23,11 @@ import com.kaliscriber.app.speech.ModelCatalog
 import com.kaliscriber.app.speech.ModelManager
 import com.kaliscriber.app.speech.ModelState
 import com.kaliscriber.app.speech.SpeechOutput
+import com.kaliscriber.app.tasks.RecapReminder
 import com.kaliscriber.app.tasks.TaskReminders
 import com.kaliscriber.core.backup.LibraryBackup
+import com.kaliscriber.core.recap.WeeklyRecap
+import com.kaliscriber.core.recap.WeeklyRecaps
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.DefaultAiServices
 import com.kaliscriber.core.ai.MeetingAi
@@ -69,6 +72,7 @@ class KaliScriberApp : Application() {
         container = AppContainer(this)
         createNotificationChannel()
         TaskReminders.createChannel(this)
+        RecapReminder.createChannel(this)
     }
 
     private fun createNotificationChannel() {
@@ -166,6 +170,11 @@ class AppContainer(context: Context) {
         settings,
         corpus = { searchIndex },
     )
+    /** Recaps across a week of meetings. */
+    val recaps = WeeklyRecaps(
+        meetings, ai, settings,
+        JsonValueStore(File(filesDir, "recaps.json"), ListSerializer(WeeklyRecap.serializer()), emptyList()),
+    )
     /** Events from the CalDAV calendar, for meeting titles, invitees and prep. */
     val calendar = CalendarService(http, settings, secrets)
     val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope, onStart = { meetingId ->
@@ -224,6 +233,12 @@ class AppContainer(context: Context) {
                 .map { it.taskReminders to it.reminderHour }
                 .distinctUntilChanged()
                 .collect { runCatching { TaskReminders.schedule(appContext, settings()) } }
+        }
+        scope.launch {
+            settingsStore.value
+                .map { it.weeklyRecap }
+                .distinctUntilChanged()
+                .collect { runCatching { RecapReminder.schedule(appContext, settings()) } }
         }
         scope.launch {
             meetings.load()

@@ -180,6 +180,21 @@ object Prompts {
         appendLine("</meetings>")
     }
 
+    /** Asks for a recap across a week of meetings, given each meeting's notes. */
+    fun weeklyRecapSystem(outputLanguage: String, glossary: String) = buildString {
+        appendLine("You write a weekly recap for the user, who recorded these meetings. Below are the notes of each meeting in the week.")
+        appendLine("- overview: 3 to 5 sentences on what the week was about and what moved forward.")
+        appendLine("- decisions: the decisions that matter, each with the meeting it was made in, e.g. \"Price rises 10% in November (Q3 launch sync)\".")
+        appendLine("- themes: topics that came up in more than one meeting, or took most of the week.")
+        appendLine("- risks: risks, blockers and disagreements still open at the end of the week.")
+        appendLine("- followUps: what the user should follow up next week, and with whom.")
+        appendLine("- Use only the notes. Leave a list empty rather than guess. Keep each item to one sentence.")
+        appendLine("- $PLACEHOLDER_RULE")
+        appendLine("- ${languageRule(outputLanguage)}")
+        glossaryBlock(glossary)?.let { append(it) }
+        appendLine("""Reply ONLY with JSON: {"overview": "...", "decisions": ["..."], "themes": ["..."], "risks": ["..."], "followUps": ["..."]}""")
+    }
+
     const val SEARCH_KEYWORDS_SYSTEM = """You turn a question about past meetings into search keywords. Include the question's key terms, likely synonyms and related words someone might have said out loud (e.g. "pricing" -> "price", "cost", "discount"), and any names. Reply ONLY with JSON: {"keywords": ["...", "..."]} with at most 15 single words."""
 
     fun meetingContext(meeting: Meeting, transcript: String) = buildString {

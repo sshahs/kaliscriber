@@ -17,6 +17,7 @@ import com.kaliscriber.app.ui.home.HomeScreen
 import com.kaliscriber.app.ui.meeting.MeetingScreen
 import com.kaliscriber.app.ui.notes.NoteScreen
 import com.kaliscriber.app.ui.people.PersonScreen
+import com.kaliscriber.app.ui.recap.RecapScreen
 import com.kaliscriber.app.ui.recording.RecordingScreen
 import com.kaliscriber.app.ui.settings.SettingsScreen
 
@@ -28,6 +29,7 @@ object Routes {
     const val NOTE = "note/{id}"
     const val ASK_ALL = "ask-all?q={q}"
     const val PERSON = "person/{name}"
+    const val RECAP = "recap"
     fun person(name: String) = "person/${Uri.encode(name)}"
     fun meeting(id: String, tab: Int = 0, segmentId: String? = null) =
         "meeting/$id?tab=$tab" + (segmentId?.let { "&seg=${Uri.encode(it)}" } ?: "")
@@ -49,6 +51,10 @@ fun AppNavigation(openTasks: Boolean = false) {
             }
             // Home starts the recording (it asks for the microphone permission if needed).
             LaunchRequest.Record -> if (nav.currentDestination?.route != Routes.HOME) nav.popBackStack(Routes.HOME, inclusive = false)
+            LaunchRequest.OpenRecap -> {
+                launches.consume(LaunchRequest.OpenRecap)
+                nav.navigate(Routes.RECAP) { popUpTo(Routes.HOME) }
+            }
             null -> Unit
         }
     }
@@ -62,8 +68,12 @@ fun AppNavigation(openTasks: Boolean = false) {
                 onOpenMeetingAt = { id, segmentId -> nav.navigate(Routes.meeting(id, tab = if (segmentId != null) 1 else 0, segmentId = segmentId)) },
                 onAskAll = { nav.navigate(Routes.askAll(it)) },
                 onOpenPerson = { nav.navigate(Routes.person(it)) },
+                onOpenRecap = { nav.navigate(Routes.RECAP) },
                 startTab = if (openTasks) 2 else 0,
             )
+        }
+        composable(Routes.RECAP) {
+            RecapScreen(onBack = { nav.popBackStack() }, onOpenMeeting = { nav.navigate(Routes.meeting(it)) })
         }
         composable(Routes.PERSON, arguments = listOf(navArgument("name") { type = NavType.StringType })) { entry ->
             PersonScreen(

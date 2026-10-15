@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.kaliscriber.app.tasks.RecapReminder
 import com.kaliscriber.app.tasks.TaskReminders
 import com.kaliscriber.app.ui.AppNavigation
 import com.kaliscriber.app.ui.theme.KaliScriberTheme
@@ -50,6 +51,10 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         if (intent.action == ACTION_RECORD || intent.getBooleanExtra(EXTRA_RECORD, false)) {
             container.launches.post(LaunchRequest.Record)
+            return
+        }
+        if (intent.getBooleanExtra(RecapReminder.EXTRA_OPEN_RECAP, false)) {
+            container.launches.post(LaunchRequest.OpenRecap)
             return
         }
         val uris = when (intent.action) {
