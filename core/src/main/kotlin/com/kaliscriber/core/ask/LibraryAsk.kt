@@ -19,6 +19,8 @@ import com.kaliscriber.core.store.MeetingRepository
 import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -49,9 +51,17 @@ class LibraryAsk(
         val q = question.trim()
         val previous = history.value.value
         history.update { it + AskMessage(Ids.new(), ChatRole.USER, q, clock.now()) }
+        var partial = ""
+        val track: ((String) -> Unit)? = onText?.let { forward -> { text -> partial = text; forward(text) } }
         val reply = try {
-            answer(q, previous, onText)
+            answer(q, previous, track)
         } catch (e: CancellationException) {
+            // Stopped while the answer was being written: keep what had arrived.
+            if (partial.isNotBlank()) {
+                withContext(NonCancellable) {
+                    history.update { it + AskMessage(Ids.new(), ChatRole.ASSISTANT, partial.trim(), clock.now(), stopped = true) }
+                }
+            }
             throw e
         } catch (e: Exception) {
             AskMessage(Ids.new(), ChatRole.ASSISTANT, e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName, clock.now(), isError = true)

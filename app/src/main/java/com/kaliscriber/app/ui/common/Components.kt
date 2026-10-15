@@ -186,6 +186,12 @@ fun BookmarkMarker(bookmark: Bookmark, modifier: Modifier = Modifier, onClick: (
     }
 }
 
+/** Marks an answer the user stopped before it was finished. */
+@Composable
+fun StoppedLabel() {
+    Text("Stopped", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
 /** An AI answer that is still being written, shown as it arrives. */
 @Composable
 fun StreamingAnswer(text: String, maxWidth: Dp) {

@@ -251,6 +251,8 @@ data class ChatMessage(
     val createdAt: Long,
     val excerpt: ExcerptRef? = null,
     val isError: Boolean = false,
+    /** The user stopped the answer while it was being written; [content] is what had arrived. */
+    val stopped: Boolean = false,
 )
 
 /** AI notes on one stretch of a meeting, written while it was being recorded. */
@@ -267,6 +269,8 @@ data class AskMessage(
     /** Meetings (and moments in them) the answer is based on. */
     val sources: List<AskSource> = emptyList(),
     val isError: Boolean = false,
+    /** The user stopped the answer while it was being written; [content] is what had arrived. */
+    val stopped: Boolean = false,
 )
 
 /** A meeting an answer cites, optionally at a moment in its transcript. */

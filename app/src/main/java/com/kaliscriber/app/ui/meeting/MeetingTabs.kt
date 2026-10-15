@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Subject
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.Topic
@@ -105,6 +106,7 @@ import com.kaliscriber.app.ui.common.EmptyState
 import com.kaliscriber.app.ui.common.MarkdownText
 import com.kaliscriber.app.ui.common.SectionCard
 import com.kaliscriber.app.ui.common.SpeakerBadge
+import com.kaliscriber.app.ui.common.StoppedLabel
 import com.kaliscriber.app.ui.common.StreamingAnswer
 import com.kaliscriber.app.ui.common.bookmarksByLine
 import com.kaliscriber.app.ui.recording.ExpectedSpeakersRow
@@ -722,6 +724,7 @@ fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
                                     }
                                 } else {
                                     SelectionContainer { MarkdownText(message.content) }
+                                    if (message.stopped) StoppedLabel()
                                     val isSpeaking = speaking == message.id
                                     IconButton(
                                         onClick = { if (isSpeaking) vm.stopSpeaking() else vm.speak(message.id, message.content) },
@@ -781,8 +784,12 @@ fun AskTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel) {
                     modifier = Modifier.weight(1f),
                     maxLines = 4,
                 )
-                IconButton(onClick = { send(input) }, enabled = input.isNotBlank() && !thinking) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                if (thinking) {
+                    IconButton(onClick = vm::stopAnswer) { Icon(Icons.Filled.StopCircle, contentDescription = "Stop the answer") }
+                } else {
+                    IconButton(onClick = { send(input) }, enabled = input.isNotBlank()) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                    }
                 }
             }
         }

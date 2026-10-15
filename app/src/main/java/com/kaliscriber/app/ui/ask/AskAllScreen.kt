@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,8 +38,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -56,11 +57,13 @@ import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.ui.common.MarkdownText
+import com.kaliscriber.app.ui.common.StoppedLabel
 import com.kaliscriber.app.ui.common.StreamingAnswer
 import com.kaliscriber.core.model.AskMessage
 import com.kaliscriber.core.model.AskSource
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.transcript.TranscriptFormatter
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,11 +79,18 @@ class AskAllViewModel(private val container: AppContainer) : ViewModel() {
     private val _answering = MutableStateFlow<String?>(null)
     val answering: StateFlow<String?> = _answering.asStateFlow()
 
+    private var job: Job? = null
+
+    /** Stops the answer being written; what has arrived so far is kept. */
+    fun stop() {
+        job?.cancel()
+    }
+
     fun ask(question: String) {
         if (question.isBlank() || _thinking.value) return
         _thinking.value = true
         // The app scope keeps the request going if the user leaves the screen.
-        container.scope.launch {
+        job = container.scope.launch {
             try {
                 container.libraryAsk.ask(question) { _answering.value = it }
             } finally {
@@ -192,8 +202,12 @@ fun AskAllScreen(
                     modifier = Modifier.weight(1f),
                     maxLines = 4,
                 )
-                IconButton(onClick = { send(input) }, enabled = input.isNotBlank() && !thinking) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                if (thinking) {
+                    IconButton(onClick = vm::stop) { Icon(Icons.Filled.StopCircle, contentDescription = "Stop the answer") }
+                } else {
+                    IconButton(onClick = { send(input) }, enabled = input.isNotBlank()) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                    }
                 }
             }
         }
@@ -218,6 +232,7 @@ private fun MessageBubble(message: AskMessage, onOpenSource: (AskSource) -> Unit
                     Text(message.content, style = MaterialTheme.typography.bodyMedium)
                 } else {
                     SelectionContainer { MarkdownText(message.content) }
+                    if (message.stopped) StoppedLabel()
                 }
                 if (message.sources.isNotEmpty()) {
                     Text("Sources", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

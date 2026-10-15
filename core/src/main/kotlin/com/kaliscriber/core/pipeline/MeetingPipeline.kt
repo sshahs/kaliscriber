@@ -35,6 +35,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelAndJoin
@@ -904,11 +905,21 @@ class MeetingPipeline(
         val before = repo.get(meetingId) ?: return Result.failure(IllegalArgumentException("Meeting not found"))
         val userMessage = ChatMessage(Ids.new(), ChatRole.USER, question.trim(), clock.now(), excerpt)
         repo.update(meetingId) { it.copy(chat = it.chat + userMessage) }
+        var partial = ""
+        val track: ((String) -> Unit)? = onText?.let { forward -> { text -> partial = text; forward(text) } }
         return try {
-            val answer = meetingAi.answer(before, before.chat, question.trim(), excerpt, spoken, onText)
+            val answer = meetingAi.answer(before, before.chat, question.trim(), excerpt, spoken, track)
             repo.update(meetingId) { it.copy(chat = it.chat + ChatMessage(Ids.new(), ChatRole.ASSISTANT, answer, clock.now())) }
             Result.success(answer)
         } catch (e: CancellationException) {
+            // Stopped while the answer was being written: keep what had arrived.
+            if (partial.isNotBlank()) {
+                withContext(NonCancellable) {
+                    repo.update(meetingId) {
+                        it.copy(chat = it.chat + ChatMessage(Ids.new(), ChatRole.ASSISTANT, partial.trim(), clock.now(), stopped = true))
+                    }
+                }
+            }
             throw e
         } catch (e: Exception) {
             val message = describe(e)

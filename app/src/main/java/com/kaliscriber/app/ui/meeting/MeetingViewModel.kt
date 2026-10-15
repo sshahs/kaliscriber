@@ -75,10 +75,10 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
      * Runs a task for this meeting and reports the outcome. [background] tasks keep running when the
      * user leaves the screen or the app (see [com.kaliscriber.app.processing.MeetingJobs]).
      */
-    private fun launchTask(kind: Busy, success: String? = null, background: Boolean = false, block: suspend () -> Unit) {
-        if (kind in _busy.value) return
+    private fun launchTask(kind: Busy, success: String? = null, background: Boolean = false, block: suspend () -> Unit): Job? {
+        if (kind in _busy.value) return null
         _busy.update { it + kind }
-        viewModelScope.launch {
+        return viewModelScope.launch {
             try {
                 if (background) container.jobs.run(meetingId, block) else block()
                 if (success != null) _messages.send(success)
@@ -114,7 +114,14 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         if (question.isBlank()) return
         val about = excerpt.value
         excerpt.value = null
-        launchTask(Busy.ASK) { askStreaming(question, about) }
+        askJob = launchTask(Busy.ASK) { askStreaming(question, about) }
+    }
+
+    private var askJob: Job? = null
+
+    /** Stops the answer being written; what has arrived so far is kept. */
+    fun stopAnswer() {
+        askJob?.cancel()
     }
 
     private suspend fun askStreaming(question: String, about: ExcerptRef?) {
@@ -134,7 +141,7 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         val question = chat.take(index.coerceAtLeast(0)).lastOrNull { it.role == ChatRole.USER } ?: return
         viewModelScope.launch {
             repo.removeChatMessages(meetingId, setOf(errorMessageId, question.id))
-            launchTask(Busy.ASK) { askStreaming(question.content, question.excerpt) }
+            askJob = launchTask(Busy.ASK) { askStreaming(question.content, question.excerpt) }
         }
     }
 
