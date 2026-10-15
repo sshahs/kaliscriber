@@ -82,6 +82,8 @@ import com.kaliscriber.app.AppContainer
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.app.ui.common.BookmarkMarker
+import com.kaliscriber.app.ui.common.GapMarker
+import com.kaliscriber.app.ui.common.gapsByLine
 import com.kaliscriber.app.ui.common.EmptyState
 import com.kaliscriber.app.ui.common.SpeakerBadge
 import com.kaliscriber.app.ui.common.bookmarksByLine
@@ -248,7 +250,16 @@ private fun RecorderHeader(state: RecordingState.Recording, onPause: () -> Unit,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Waveform(state.level, state.paused, Modifier.fillMaxWidth().height(64.dp))
+        Waveform(state.level, state.paused || state.interruption != null, Modifier.fillMaxWidth().height(64.dp))
+        state.interruption?.let { reason ->
+            Text(
+                "${reason.replaceFirstChar(Char::uppercase)} has the microphone, so nothing is being recorded. " +
+                    "Recording carries on by itself when it's over, and the gap is marked in the transcript.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.errorContainer).padding(12.dp),
+            )
+        }
         state.micNote?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         FilledTonalButton(
             onClick = {
@@ -410,6 +421,7 @@ private fun LiveTranscript(meeting: Meeting?, modifier: Modifier = Modifier) {
         return
     }
     val marks = meeting?.let(::bookmarksByLine).orEmpty()
+    val gaps = meeting?.let(::gapsByLine).orEmpty()
     // Speakers are detected in ten-minute blocks while recording; until then a line has no one to show.
     val identifiedUntil = segments.lastOrNull { meeting?.speaker(it.speakerId)?.label?.startsWith(SpeakerAssigner.LIVE_PREFIX) == true }?.endMs
     if (identifiedUntil != null) {
@@ -435,6 +447,7 @@ private fun LiveTranscript(meeting: Meeting?, modifier: Modifier = Modifier) {
                 }
                 Text(seg.text, style = MaterialTheme.typography.bodyLarge)
                 marks[seg.id]?.forEach { BookmarkMarker(it) }
+                gaps[seg.id]?.forEach { GapMarker(it) }
             }
         }
     }

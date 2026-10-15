@@ -108,7 +108,7 @@ class RecordingService : LifecycleService() {
             manager.state
                 .distinctUntilChangedBy { state ->
                     when (state) {
-                        is RecordingState.Recording -> "rec-${state.paused}"
+                        is RecordingState.Recording -> "rec-${state.paused}-${state.interruption}"
                         is RecordingState.Finishing -> "finishing"
                         RecordingState.Idle -> "idle"
                     }
@@ -166,7 +166,9 @@ class RecordingService : LifecycleService() {
         when (state) {
             is RecordingState.Recording -> {
                 builder.setContentTitle(if (state.paused) "Recording paused" else "Recording meeting")
-                    .setContentText(step ?: "Live transcription is running")
+                    .setContentText(
+                        step ?: state.interruption?.let { "Paused by $it: nothing is recorded until it's over" } ?: "Live transcription is running",
+                    )
                     .setUsesChronometer(!state.paused)
                     .setWhen(System.currentTimeMillis() - state.elapsedMs)
                 if (state.paused) {

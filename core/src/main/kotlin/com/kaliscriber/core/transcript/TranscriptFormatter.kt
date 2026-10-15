@@ -74,6 +74,10 @@ object TranscriptFormatter {
             section("Risks", insights.risks)
         }
         section("Bookmarks", meeting.bookmarks.map { b -> "[${timestamp(b.atMs)}]" + if (b.note.isNotBlank()) " ${b.note}" else "" })
+        section(
+            "Not recorded",
+            meeting.interruptions.map { g -> "[${timestamp(g.atMs)}] for ${timestamp(g.durationMs)}" + g.reason.takeIf { it.isNotBlank() }?.let { " ($it had the microphone)" }.orEmpty() },
+        )
         val gaps = meeting.gaps
         if (gaps != null && gaps.questions.isNotEmpty()) {
             appendLine("## Open questions")

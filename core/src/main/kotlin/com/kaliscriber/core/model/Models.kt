@@ -46,6 +46,8 @@ data class Meeting(
     val calendarEvent: CalendarEvent? = null,
     /** Moments the user marked while recording, oldest first. */
     val bookmarks: List<Bookmark> = emptyList(),
+    /** Stretches when the microphone was taken (a call, another app) and nothing was recorded. */
+    val interruptions: List<Interruption> = emptyList(),
     /** The summary format the user chose; null guesses it from the title (see [MeetingType.of]). */
     val type: MeetingType? = null,
     /** When the recording was deleted to save space (the transcript and notes were kept). */
@@ -138,6 +140,15 @@ data class Speaker(
  */
 @Serializable
 data class Bookmark(val id: String, val atMs: Long, val note: String = "")
+
+/**
+ * A stretch of a recording when the microphone gave only silence because a phone call or another
+ * app had it. [atMs] is where it falls in the recording; [durationMs] is how long it lasted.
+ */
+@Serializable
+data class Interruption(val atMs: Long, val durationMs: Long, val reason: String = "") {
+    val endMs: Long get() = atMs + durationMs
+}
 
 /** One processing step: when it started, how long it took and whether it worked. */
 @Serializable

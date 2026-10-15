@@ -6,6 +6,7 @@ import androidx.core.content.ContextCompat
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.model.AudioChunk
 import com.kaliscriber.core.model.Bookmark
+import com.kaliscriber.core.model.Interruption
 import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.pipeline.MeetingPipeline
 import com.kaliscriber.core.store.MeetingRepository
@@ -37,6 +38,8 @@ sealed interface RecordingState {
         val queuedChunks: Int = 0,
         /** Which microphone is in use, when the user chose one. */
         val micNote: String? = null,
+        /** What has taken the microphone (e.g. "a phone call") while nothing is being recorded. */
+        val interruption: String? = null,
     ) : RecordingState
 
     /** Capture stopped; the final transcription and AI analysis are running. */
@@ -111,6 +114,14 @@ class RecordingManager(
 
                 override fun onProgress(capturedMs: Long, level: Float) {
                     updateRecording { it.copy(elapsedMs = capturedMs, level = level) }
+                }
+
+                override fun onInterruption(reason: String?) {
+                    updateRecording { it.copy(interruption = reason) }
+                }
+
+                override fun onGap(gap: Interruption) {
+                    scope.launch { meetings.update(meetingId) { it.copy(interruptions = it.interruptions + gap) } }
                 }
 
                 override fun onError(error: Throwable) {

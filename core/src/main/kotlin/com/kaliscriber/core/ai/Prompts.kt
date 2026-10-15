@@ -224,6 +224,15 @@ object Prompts {
             appendLine(insights.summary)
             appendLine("</summary>")
         }
+        if (meeting.interruptions.isNotEmpty()) {
+            appendLine()
+            appendLine("<recording_gaps>")
+            appendLine("Nothing was recorded during these stretches (the microphone was taken, e.g. by a phone call). Don't guess what was said then.")
+            meeting.interruptions.forEach { gap ->
+                appendLine("- [${TranscriptFormatter.timestamp(gap.atMs)}] ${gap.durationMs / 1000} s" + gap.reason.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty())
+            }
+            appendLine("</recording_gaps>")
+        }
         if (meeting.bookmarks.isNotEmpty()) {
             appendLine()
             appendLine("<bookmarks>")

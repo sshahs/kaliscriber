@@ -1,5 +1,10 @@
 package com.kaliscriber.app.recording
 
+import com.kaliscriber.core.model.Interruption
+import com.kaliscriber.core.audio.InterruptionTracker
+import android.os.Looper
+import android.os.Handler
+import android.media.AudioRecordingConfiguration
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioDeviceInfo
@@ -45,6 +50,12 @@ class AudioCaptureEngine(
         fun onChunk(chunk: AudioChunk)
         fun onProgress(capturedMs: Long, level: Float)
         fun onError(error: Throwable)
+
+        /** The microphone was taken ([reason], e.g. "a phone call"), or given back (null). */
+        fun onInterruption(reason: String?) {}
+
+        /** A finished stretch with nothing recorded. */
+        fun onGap(gap: Interruption) {}
     }
 
     @Volatile private var running = false
@@ -57,6 +68,9 @@ class AudioCaptureEngine(
     private val effects = mutableListOf<AudioEffect>()
     private val audioManager: AudioManager? = context.getSystemService(AudioManager::class.java)
     private var bluetoothRouted = false
+    /** Android 10+ reports when it gives this app silence because something else has the microphone. */
+    @Volatile private var clientSilenced = false
+    private var recordingCallback: AudioManager.AudioRecordingCallback? = null
 
     /** Which microphone is in use, when the user chose one, e.g. "Bluetooth headset not connected; using the phone". */
     var micNote: String? = null
@@ -90,6 +104,7 @@ class AudioCaptureEngine(
             else -> "Microphone: ${device.productName?.toString()?.takeIf { it.isNotBlank() } ?: microphone.label}"
         }
         if (cleanup) addCleanup(rec.audioSessionId)
+        watchSilencing(rec.audioSessionId)
         try {
             rec.startRecording()
         } catch (e: Exception) {
@@ -114,9 +129,27 @@ class AudioCaptureEngine(
             it.release()
         }
         record = null
+        recordingCallback?.let { cb -> runCatching { audioManager?.unregisterAudioRecordingCallback(cb) } }
+        recordingCallback = null
         if (bluetoothRouted) releaseBluetooth()
         return capturedMs
     }
+
+    private fun watchSilencing(session: Int) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val callback = object : AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
+                clientSilenced = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                    configs.any { it.clientAudioSessionId == session && it.isClientSilenced }
+            }
+        }
+        runCatching { audioManager?.registerAudioRecordingCallback(callback, Handler(Looper.getMainLooper())) }
+            .onSuccess { recordingCallback = callback }
+    }
+
+    /** Why the microphone was taken, as well as Android lets an app tell. */
+    private fun interruptionReason(): String =
+        if (audioManager?.mode == AudioManager.MODE_IN_CALL) "a phone call" else "another app"
 
     /** The connected input matching the user's choice, or null for Android's default. */
     private fun preferredDevice(): AudioDeviceInfo? {
@@ -187,6 +220,7 @@ class AudioCaptureEngine(
         var capturedBytes = 0L
         var chunkStartBytes = 0L
         var encoderOk = encoder != null
+        val gaps = InterruptionTracker()
 
         fun emitChunk() {
             val startMs = Wav.durationMs(chunkStartBytes, SAMPLE_RATE)
@@ -214,13 +248,27 @@ class AudioCaptureEngine(
                         .isSuccess
                 }
                 chunk.write(readBuffer, 0, n)
+                val blockStartMs = capturedMs
                 capturedBytes += n
                 capturedMs = Wav.durationMs(capturedBytes, SAMPLE_RATE)
+                // Silence handed over while something else has the microphone becomes a marked gap.
+                when (val event = gaps.block(blockStartMs, capturedMs, InterruptionTracker.allZero(readBuffer, n), clientSilenced) { interruptionReason() }) {
+                    is InterruptionTracker.Event.Started -> listener.onInterruption(event.reason)
+                    is InterruptionTracker.Event.Ended -> {
+                        listener.onInterruption(null)
+                        listener.onGap(event.gap)
+                    }
+                    null -> Unit
+                }
                 listener.onProgress(capturedMs, level(readBuffer, n))
                 if (chunk.size() >= chunkTarget) emitChunk()
             }
             // Keep a trailing chunk if it holds at least a second of audio.
             if (chunk.size() >= BYTES_PER_SECOND) emitChunk()
+            gaps.finish(capturedMs)?.let {
+                listener.onInterruption(null)
+                listener.onGap(it)
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "Capture failed", t)
             runCatching { if (chunk.size() >= BYTES_PER_SECOND) emitChunk() }

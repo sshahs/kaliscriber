@@ -121,6 +121,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaliscriber.app.ui.common.BookmarkMarker
+import com.kaliscriber.app.ui.common.GapMarker
+import com.kaliscriber.app.ui.common.gapsByLine
 import com.kaliscriber.app.ui.common.ErrorFixButton
 import com.kaliscriber.app.ui.common.page
 import com.kaliscriber.app.ui.settings.SettingsPage
@@ -559,6 +561,7 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
             )
         }
         val marks = bookmarksByLine(meeting)
+        val gaps = gapsByLine(meeting)
         val matchColor = MaterialTheme.colorScheme.tertiaryContainer
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 24.dp)) {
             items(shown, key = { it.id }) { seg ->
@@ -591,6 +594,7 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
                     marks[seg.id]?.forEach { mark ->
                         BookmarkMarker(mark, onClick = { vm.player.seekTo((mark.atMs - BOOKMARK_LEAD_MS).coerceAtLeast(0)) })
                     }
+                    gaps[seg.id]?.forEach { GapMarker(it) }
                 }
             }
         }

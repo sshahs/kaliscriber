@@ -2,6 +2,8 @@
 
 package com.kaliscriber.app.ui.common
 
+import androidx.compose.material.icons.filled.MicOff
+import com.kaliscriber.core.model.Interruption
 import androidx.compose.material3.TextButton
 import com.kaliscriber.app.ui.settings.SettingsPage
 import com.kaliscriber.core.ai.ErrorFixes
@@ -166,6 +168,35 @@ fun bookmarksByLine(meeting: Meeting): Map<String, List<Bookmark>> {
     if (meeting.bookmarks.isEmpty() || meeting.segments.isEmpty()) return emptyMap()
     return meeting.bookmarks.groupBy { b ->
         (meeting.segments.lastOrNull { it.startMs <= b.atMs } ?: meeting.segments.first()).id
+    }
+}
+
+/** Recording gaps by the transcript line they follow (the first line if they come before any). */
+fun gapsByLine(meeting: Meeting): Map<String, List<Interruption>> {
+    if (meeting.interruptions.isEmpty() || meeting.segments.isEmpty()) return emptyMap()
+    return meeting.interruptions.groupBy { gap ->
+        (meeting.segments.lastOrNull { it.startMs <= gap.atMs } ?: meeting.segments.first()).id
+    }
+}
+
+/** A stretch when the microphone was taken and nothing was recorded. */
+@Composable
+fun GapMarker(gap: Interruption, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.MicOff, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onErrorContainer)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "Not recorded from ${TranscriptFormatter.timestamp(gap.atMs)} for ${TranscriptFormatter.timestamp(gap.durationMs)}" +
+                gap.reason.takeIf { it.isNotBlank() }?.let { " ($it had the microphone)" }.orEmpty(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+        )
     }
 }
 
