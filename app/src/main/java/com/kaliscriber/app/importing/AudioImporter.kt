@@ -38,11 +38,18 @@ class AudioImporter(
         } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Imported audio"
         val meeting = meetings.create(name.substringBeforeLast('.').ifBlank { "Imported audio" }, status = MeetingStatus.TRANSCRIBING)
         val extension = name.substringAfterLast('.', "").lowercase().take(5).ifBlank { extensionFor(resolver.getType(uri)) }
-        val target = File(meetings.audioDir(meeting.id), "imported.$extension")
+        val dir = meetings.audioDir(meeting.id)
+        var target = File(dir, "imported.$extension")
         val durationMs = try {
             withContext(Dispatchers.IO) {
-                resolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
-                    ?: error("Could not read the file")
+                // From a video only the sound is kept; anything else is copied as it is.
+                val audioOnly = if (isVideo(resolver.getType(uri), extension)) AudioTrackExtractor.extract(context, uri, dir) else null
+                if (audioOnly != null) {
+                    target = audioOnly
+                } else {
+                    resolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+                        ?: error("Could not read the file")
+                }
                 runCatching {
                     MediaMetadataRetriever().run {
                         try {
@@ -59,15 +66,19 @@ class AudioImporter(
             throw e
         }
         if (durationMs != null) meetings.update(meeting.id) { it.copy(durationMs = durationMs) }
+        val audio = target
         scope.launch {
             try {
-                jobs.run(meeting.id) { pipeline.processImportedAudio(meeting.id, target, durationMs) }
+                jobs.run(meeting.id) { pipeline.processImportedAudio(meeting.id, audio, durationMs) }
             } catch (e: Exception) {
                 Log.w("KaliScriber", "Import of ${meeting.id} failed: ${e.message}")
             }
         }
         return meeting.id
     }
+
+    private fun isVideo(mime: String?, extension: String) =
+        mime?.startsWith("video/") == true || extension in setOf("mp4", "mov", "m4v", "webm", "mkv", "3gp")
 
     private fun extensionFor(mime: String?): String = when {
         mime == null -> "m4a"
