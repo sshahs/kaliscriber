@@ -14,6 +14,7 @@ import com.kaliscriber.core.model.FollowUpQuestion
 import com.kaliscriber.core.model.Gap
 import com.kaliscriber.core.model.GapAnalysis
 import com.kaliscriber.core.model.Highlight
+import com.kaliscriber.core.model.InsightSection
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingInsights
 import com.kaliscriber.core.model.Note
@@ -154,7 +155,8 @@ class MeetingAi(
 
     suspend fun insights(meeting: Meeting, fromNotes: Boolean = false): MeetingInsights {
         requireTranscript(meeting)
-        val obj = meetingJson(meeting, Prompts.INSIGHTS_TASK, insightsSource(meeting, fromNotes))
+        val type = MeetingType.of(meeting)
+        val obj = meetingJson(meeting, Prompts.insightsTask(type), insightsSource(meeting, fromNotes))
         val previous = meeting.insights?.actionItems.orEmpty()
         return MeetingInsights(
             title = obj.str("title").orEmpty(),
@@ -188,6 +190,11 @@ class MeetingAi(
             risks = obj.strings("risks", "concerns"),
             nextSteps = obj.strings("nextSteps", "next_steps"),
             sentiment = obj.str("sentiment", "tone").orEmpty(),
+            sections = obj.list("sections").mapNotNull { el ->
+                val sec = el as? JsonObject ?: return@mapNotNull null
+                InsightSection(sec.str("title", "name") ?: return@mapNotNull null, sec.strings("items", "points"))
+            }.filter { it.items.isNotEmpty() },
+            type = type,
             generatedAt = clock.now(),
         )
     }

@@ -1,8 +1,9 @@
 package com.kaliscriber.core.model
 
+import com.kaliscriber.core.ai.MeetingType
+import com.kaliscriber.core.calendar.CalendarEvent
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
-import com.kaliscriber.core.calendar.CalendarEvent
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNames
 
@@ -45,6 +46,8 @@ data class Meeting(
     val calendarEvent: CalendarEvent? = null,
     /** Moments the user marked while recording, oldest first. */
     val bookmarks: List<Bookmark> = emptyList(),
+    /** The summary format the user chose; null guesses it from the title (see [MeetingType.of]). */
+    val type: MeetingType? = null,
     /**
      * A summary of [segments] kept with the meeting, so lists, People pages and search can use it
      * while the transcript itself stays on disk (meeting lists leave [segments] empty).
@@ -194,8 +197,15 @@ data class MeetingInsights(
     val risks: List<String> = emptyList(),
     val nextSteps: List<String> = emptyList(),
     val sentiment: String = "",
+    /** Sections particular to the meeting's type (e.g. "Blockers" for a stand-up). */
+    val sections: List<InsightSection> = emptyList(),
+    /** The type the notes were written for. */
+    val type: MeetingType? = null,
     val generatedAt: Long = 0,
 )
+
+@Serializable
+data class InsightSection(val title: String, val items: List<String>)
 
 @Serializable
 data class Highlight(

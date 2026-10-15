@@ -99,6 +99,18 @@ object Prompts {
         Use empty arrays when nothing applies.
     """.trimIndent()
 
+    /** [INSIGHTS_TASK] for a kind of meeting: its focus, and the extra sections it needs. */
+    fun insightsTask(type: MeetingType): String {
+        if (type.sections.isEmpty()) return INSIGHTS_TASK
+        return buildString {
+            appendLine(INSIGHTS_TASK)
+            appendLine(type.focus)
+            appendLine("Also add \"sections\" to the JSON object: [{\"title\": \"section title\", \"items\": [\"short point\"]}], with exactly these sections in this order:")
+            type.sections.forEach { (title, guidance) -> appendLine("- \"$title\": $guidance") }
+            append("Leave a section's items empty if the meeting didn't cover it.")
+        }
+    }
+
     val GAPS_TASK = """
         $TASK_GAPS
         Find what is missing, unclear or unresolved in the meeting, then write questions that the user (the participant who recorded it) can answer to fill those gaps. Look for:

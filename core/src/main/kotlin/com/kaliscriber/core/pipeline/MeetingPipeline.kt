@@ -4,6 +4,7 @@ import com.kaliscriber.core.ai.AiException
 import com.kaliscriber.core.ai.AiServices
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.MeetingAi
+import com.kaliscriber.core.ai.MeetingType
 import com.kaliscriber.core.ai.Prompts
 import com.kaliscriber.core.ai.stt.DiarizedBlock
 import com.kaliscriber.core.ai.stt.SpeakerDiarizer
@@ -748,7 +749,12 @@ class MeetingPipeline(
         log("Calendar: recording \"${event.title}\" with ${event.attendees.size} invitee(s)")
     }
 
-    /** Sets how many people are in the meeting (null = detect automatically). */
+    /** Sets the meeting's summary format (null guesses it from the title). */
+    suspend fun setMeetingType(meetingId: String, type: MeetingType?) {
+        repo.update(meetingId) { it.copy(type = type) }
+    }
+
+        /** Sets how many people are in the meeting (null = detect automatically). */
     suspend fun setExpectedSpeakers(meetingId: String, count: Int?) {
         repo.update(meetingId) { it.copy(expectedSpeakers = count?.takeIf { n -> n > 0 }) }
     }

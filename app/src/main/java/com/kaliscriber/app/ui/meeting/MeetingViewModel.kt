@@ -8,6 +8,7 @@ import com.kaliscriber.app.AppContainer
 import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.export.exportMessage
 import com.kaliscriber.app.speech.VoiceRecorder
+import com.kaliscriber.core.ai.MeetingType
 import com.kaliscriber.core.ai.usage.UsageLedger
 import com.kaliscriber.core.ai.usage.UsageRecord
 import com.kaliscriber.core.export.ExportResult
@@ -85,10 +86,10 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
      * Runs a task for this meeting and reports the outcome. [background] tasks keep running when the
      * user leaves the screen or the app (see [com.kaliscriber.app.processing.MeetingJobs]).
      */
-    private fun launchTask(kind: Busy, success: String? = null, background: Boolean = false, block: suspend () -> Unit): Job? {
-        if (kind in _busy.value) return null
+    private fun launchTask(kind: Busy, success: String? = null, background: Boolean = false, block: suspend () -> Unit) {
+        if (kind in _busy.value) return
         _busy.update { it + kind }
-        return viewModelScope.launch {
+        val job = viewModelScope.launch {
             try {
                 if (background) container.jobs.run(meetingId, block) else block()
                 if (success != null) _messages.send(success)
@@ -99,9 +100,16 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
                 _busy.update { it - kind }
             }
         }
+        if (kind == Busy.ASK) askJob = job
     }
 
     fun generateInsights() = launchTask(Busy.INSIGHTS, background = true) { pipeline.generateInsights(meetingId) }
+
+    /** Changes the summary format and writes the summary again in it. */
+    fun setMeetingType(type: MeetingType?) = launchTask(Busy.INSIGHTS, background = true) {
+        pipeline.setMeetingType(meetingId, type)
+        pipeline.generateInsights(meetingId)
+    }
     fun generateGaps() = launchTask(Busy.GAPS, background = true) { pipeline.generateGaps(meetingId) }
     fun refreshWithAnswers() = launchTask(Busy.INSIGHTS, "Summary updated with your answers", background = true) { pipeline.refreshWithAnswers(meetingId) }
     fun separateSpeakers() = launchTask(Busy.SPEAKERS, "Speakers re-detected", background = true) { pipeline.redetectSpeakers(meetingId, aiOnly = true) }
@@ -124,7 +132,7 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         if (question.isBlank()) return
         val about = excerpt.value
         excerpt.value = null
-        askJob = launchTask(Busy.ASK) { askStreaming(question, about) }
+        launchTask(Busy.ASK) { askStreaming(question, about) }
     }
 
     private var askJob: Job? = null
@@ -151,7 +159,7 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         val question = chat.take(index.coerceAtLeast(0)).lastOrNull { it.role == ChatRole.USER } ?: return
         viewModelScope.launch {
             repo.removeChatMessages(meetingId, setOf(errorMessageId, question.id))
-            askJob = launchTask(Busy.ASK) { askStreaming(question.content, question.excerpt) }
+            launchTask(Busy.ASK) { askStreaming(question.content, question.excerpt) }
         }
     }
 

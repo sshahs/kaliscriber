@@ -51,6 +51,7 @@ object TranscriptFormatter {
             if (insights.summary.isNotBlank()) {
                 appendLine("## Summary"); appendLine(insights.summary); appendLine()
             }
+            insights.sections.forEach { section(it.title, it.items) }
             section("Key points", insights.keyPoints)
             section("Decisions", insights.decisions)
             if (insights.actionItems.isNotEmpty()) {

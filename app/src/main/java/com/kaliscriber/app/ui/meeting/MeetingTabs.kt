@@ -37,6 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CheckCircle
@@ -62,6 +63,7 @@ import androidx.compose.material.icons.filled.Subject
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -70,6 +72,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -110,6 +114,7 @@ import com.kaliscriber.app.ui.common.StoppedLabel
 import com.kaliscriber.app.ui.common.StreamingAnswer
 import com.kaliscriber.app.ui.common.bookmarksByLine
 import com.kaliscriber.app.ui.recording.ExpectedSpeakersRow
+import com.kaliscriber.core.ai.MeetingType
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
@@ -119,6 +124,30 @@ import com.kaliscriber.core.transcript.TranscriptFormatter
 import java.io.File
 
 /** Parses "mm:ss" or "h:mm:ss" (optionally in brackets) into milliseconds. */
+/** The summary format, which the user can change; the summary is then written again. */
+@Composable
+private fun FormatRow(meeting: Meeting, enabled: Boolean, onPick: (MeetingType?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val current = MeetingType.of(meeting)
+    Box {
+        AssistChip(
+            onClick = { open = true },
+            enabled = enabled,
+            label = { Text("Format: ${current.label}" + if (meeting.type == null) " (auto)" else "") },
+            trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null, modifier = Modifier.size(18.dp)) },
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Auto (${MeetingType.guess(meeting).label})") },
+                onClick = { open = false; onPick(null) },
+            )
+            MeetingType.entries.forEach { type ->
+                DropdownMenuItem(text = { Text(type.label) }, onClick = { open = false; onPick(type) })
+            }
+        }
+    }
+}
+
 /** How far before a bookmark playback and the transcript start: the mark is about what was just said. */
 private const val BOOKMARK_LEAD_MS = 20_000L
 
@@ -158,9 +187,13 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { ListenRow(meeting, busy, vm) }
+        item { FormatRow(meeting, enabled = Busy.INSIGHTS !in busy, onPick = vm::setMeetingType) }
         if (Busy.INSIGHTS in busy) item { Text("Regenerating…", style = MaterialTheme.typography.bodySmall) }
         if (insights.summary.isNotBlank()) {
             item { SectionCard("Summary", Icons.Filled.Subject) { MarkdownText(insights.summary) } }
+        }
+        insights.sections.forEach { section ->
+            item { SectionCard(section.title, Icons.Filled.ViewAgenda) { BulletList(section.items) } }
         }
         if (insights.actionItems.isNotEmpty()) {
             item {
