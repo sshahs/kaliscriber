@@ -1,5 +1,6 @@
 package com.kaliscriber.core.ai
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
@@ -158,6 +159,9 @@ internal suspend fun OkHttpClient.streamLines(request: Request, provider: Provid
                         val line = try {
                             source.readUtf8Line()
                         } catch (e: IOException) {
+                            // A read on a call we cancelled fails as the caller is being cancelled, possibly
+                            // before this coroutine is marked as cancelled: that is not a network problem.
+                            if (call?.isCanceled() == true) throw CancellationException("Stream stopped").apply { initCause(e) }
                             ensureActive()
                             throw networkError(provider, request, e)
                         } ?: break
