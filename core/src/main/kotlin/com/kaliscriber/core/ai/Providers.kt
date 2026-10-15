@@ -149,6 +149,13 @@ enum class TtsEngine(val displayName: String) {
 @Serializable
 data class AppSettings(
     val chatProvider: ProviderId = ProviderId.OPENAI,
+    /**
+     * A quicker, cheaper model for background tasks ([FAST_TASKS]); null uses [chatProvider]'s
+     * model for everything.
+     */
+    val fastChatProvider: ProviderId? = null,
+    /** The model to use on [fastChatProvider]; blank uses that provider's chat model. */
+    val fastChatModel: String = "",
     val sttProvider: ProviderId = ProviderId.LOCAL,
     val ttsEngine: TtsEngine = TtsEngine.DEVICE,
     /** Package of the phone's text-to-speech engine to use; blank uses the system default. */
@@ -219,6 +226,18 @@ data class AppSettings(
 
     fun withProvider(id: ProviderId, transform: (ProviderSettings) -> ProviderSettings): AppSettings =
         copy(providers = providers + (id to transform(settingsFor(id))))
+
+    /** Settings that make [fastChatProvider] answer with [fastChatModel], or null without a fast model. */
+    fun fastModelSettings(): AppSettings? {
+        val id = fastChatProvider?.takeIf { it.supportsChat } ?: return null
+        val model = fastChatModel.trim()
+        return if (model.isEmpty()) this else withProvider(id) { it.copy(chatModel = model) }
+    }
+
+    companion object {
+        /** What the fast model does, as named in usage records. Everything else uses the main model. */
+        val FAST_TASKS = listOf("Running notes", "Speaker names", "Glossary fixes", "Search words")
+    }
 }
 
 /** Where meeting notes can be sent. Tokens and passwords are stored encrypted by the app. */

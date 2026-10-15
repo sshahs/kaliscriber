@@ -35,8 +35,9 @@ class FakeStt(
     }
 }
 
-class FakeAi(var llm: LlmClient, var sttClient: SttClient) : AiServices {
+class FakeAi(var llm: LlmClient, var sttClient: SttClient, var fast: LlmClient? = null) : AiServices {
     override fun chat() = llm
+    override fun fastChat() = fast ?: llm
     override fun stt() = sttClient
 }
 

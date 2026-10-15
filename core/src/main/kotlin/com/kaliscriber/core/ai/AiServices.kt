@@ -12,6 +12,8 @@ import okhttp3.OkHttpClient
 /** Builds clients for the providers currently selected in [AppSettings]. */
 interface AiServices {
     fun chat(): LlmClient
+    /** The model for quick background tasks ([AppSettings.FAST_TASKS]): the main one unless the user chose another. */
+    fun fastChat(): LlmClient = chat()
     fun stt(): SttClient
 }
 
@@ -25,7 +27,21 @@ class DefaultAiServices(
     private val usage: UsageLedger? = null,
 ) : AiServices {
 
-    override fun chat(): LlmClient = chatFor(settings().chatProvider).let { if (usage != null) MeteredLlm(it, usage) else it }
+    override fun chat(): LlmClient = metered(chatFor(settings().chatProvider))
+
+    /** The fast model; the main one when none is chosen or its provider has no API key yet. */
+    override fun fastChat(): LlmClient {
+        val s = settings()
+        val fast = s.fastModelSettings() ?: return chat()
+        val client = try {
+            chatFor(s.fastChatProvider!!, fast)
+        } catch (e: AiException) {
+            return chat()
+        }
+        return metered(client)
+    }
+
+    private fun metered(client: LlmClient): LlmClient = if (usage != null) MeteredLlm(client, usage) else client
 
     override fun stt(): SttClient = sttFor(settings().sttProvider)
 

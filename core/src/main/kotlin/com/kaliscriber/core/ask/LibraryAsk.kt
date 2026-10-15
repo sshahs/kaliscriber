@@ -95,7 +95,7 @@ class LibraryAsk(
 
     /** Search words and likely synonyms for [question] from the AI; just the question's own words if that fails. */
     private suspend fun expandKeywords(question: String): List<String> = try {
-        val reply = TaggedLlm(ai.chat(), UsageTag(null, "Ask all meetings")).complete(
+        val reply = TaggedLlm(ai.fastChat(), UsageTag(null, "Search words")).complete(
             LlmRequest(
                 system = Prompts.SEARCH_KEYWORDS_SYSTEM,
                 messages = listOf(LlmMessage(LlmRole.USER, question)),

@@ -65,8 +65,12 @@ class MeetingAi(
     private fun transcriptFor(meeting: Meeting): String =
         TranscriptFormatter.truncateMiddle(TranscriptFormatter.forPrompt(meeting), settings().maxTranscriptChars)
 
-    /** The chat model, with its requests counted towards [meeting] (or none) as [purpose]. */
-    private fun chat(meeting: Meeting?, purpose: String): LlmClient = TaggedLlm(ai.chat(), UsageTag(meeting?.id, purpose))
+    /**
+     * The chat model for [purpose] (the fast one for [AppSettings.FAST_TASKS]), with its requests
+     * counted towards [meeting] (or none).
+     */
+    private fun chat(meeting: Meeting?, purpose: String): LlmClient =
+        TaggedLlm(if (purpose in AppSettings.FAST_TASKS) ai.fastChat() else ai.chat(), UsageTag(meeting?.id, purpose))
 
     private fun purposeOf(task: String): String = when {
         task.startsWith(Prompts.TASK_INSIGHTS) -> "Summary"

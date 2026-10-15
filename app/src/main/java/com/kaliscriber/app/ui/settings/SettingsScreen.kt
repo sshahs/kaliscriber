@@ -175,6 +175,7 @@ private fun ActiveServices(settings: AppSettings, keys: Set<ProviderId>, vm: Set
             "Model: ${settings.configFor(settings.chatProvider, null).chatModel.ifBlank { "not set" }}",
             style = MaterialTheme.typography.bodySmall,
         )
+        FastModelSetting(settings, keys, vm)
         DropdownSelector(
             label = "Transcription (speech-to-text)",
             selected = settings.sttProvider,
@@ -236,6 +237,46 @@ private fun ActiveServices(settings: AppSettings, keys: Set<ProviderId>, vm: Set
             TextButton(onClick = vm::testVoice) { Text("Test voice") }
             voiceTest?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f)) }
         }
+    }
+}
+
+/** A second, quicker model for background tasks (see [AppSettings.FAST_TASKS]). */
+@Composable
+private fun FastModelSetting(settings: AppSettings, keys: Set<ProviderId>, vm: SettingsViewModel) {
+    DropdownSelector<ProviderId?>(
+        label = "Quick model for background tasks",
+        selected = settings.fastChatProvider,
+        options = listOf<ProviderId?>(null) + ProviderId.chatProviders,
+        optionLabel = { id ->
+            if (id == null) "Same as above" else id.displayName + if (id.keyRequired && id !in keys) " (no key)" else ""
+        },
+        onSelect = { id -> vm.update { it.copy(fastChatProvider = id) } },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    val provider = settings.fastChatProvider ?: return
+    var model by remember(provider) { mutableStateOf(settings.fastChatModel) }
+    OutlinedTextField(
+        value = model,
+        onValueChange = { value ->
+            model = value
+            vm.update { it.copy(fastChatModel = value) }
+        },
+        label = { Text("Model") },
+        placeholder = { Text(settings.configFor(provider, null).chatModel) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        "Used for running notes while recording, speaker name suggestions, glossary fixes and the search words for Ask all " +
+            "meetings. A small, fast model saves time and money here; summaries and answers keep the model above.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    if (provider.keyRequired && provider !in keys) {
+        Text(
+            "Add a ${provider.displayName} API key below. Until then the model above is used.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
     }
 }
 
