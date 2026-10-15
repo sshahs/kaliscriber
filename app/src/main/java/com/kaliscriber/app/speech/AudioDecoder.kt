@@ -38,6 +38,43 @@ object AudioDecoder {
         return if (size == buffer.size) buffer else buffer.copyOf(size)
     }
 
+    /**
+     * Decodes only [fromMs] to [toMs] of the file as 16 kHz mono samples, seeking rather than
+     * decoding everything before it, for clips of long recordings.
+     */
+    fun decodeRange(file: File, fromMs: Long, toMs: Long): FloatArray {
+        val wanted = ((toMs - fromMs).coerceAtLeast(0) * SAMPLE_RATE / 1000).toInt()
+        val out = FloatArray(wanted)
+        var size = 0
+        // Samples still to drop before the clip starts, known once the first decoded block's time is.
+        var skip = 0L
+        val collect: (FloatArray) -> Unit = { block ->
+            var from = 0
+            if (skip > 0) {
+                val drop = minOf(skip, block.size.toLong()).toInt()
+                skip -= drop
+                from = drop
+            }
+            val n = minOf(block.size - from, wanted - size)
+            if (n > 0) {
+                System.arraycopy(block, from, out, size, n)
+                size += n
+            }
+        }
+        if (isPcmWav(file)) {
+            val info = readWavInfo(file)
+            decodeWav(file, collect, done = { size >= wanted }, startFrame = fromMs * info.sampleRate / 1000)
+        } else {
+            decodeCompressed(
+                file, collect,
+                startUs = fromMs * 1000,
+                firstTimeUs = { t -> skip = ((fromMs * 1000 - t).coerceAtLeast(0) * SAMPLE_RATE / 1_000_000) },
+                done = { size >= wanted },
+            )
+        }
+        return if (size == wanted) out else out.copyOf(size)
+    }
+
     class TooLongException(val seconds: Long) : IOException("Audio is too long to process in one go (${seconds / 60} min)")
 
     /** Number of 16 kHz samples the file will decode to, from its header; null if unknown. */
@@ -104,15 +141,16 @@ object AudioDecoder {
         throw IOException("WAV file has no data")
     }
 
-    private fun decodeWav(file: File, onSamples: (FloatArray) -> Unit) {
+    private fun decodeWav(file: File, onSamples: (FloatArray) -> Unit, done: () -> Boolean = { false }, startFrame: Long = 0) {
         val info = readWavInfo(file)
         val resampler = Resampler(info.sampleRate, SAMPLE_RATE)
         RandomAccessFile(file, "r").use { raf ->
-            raf.seek(info.dataOffset)
             val frameBytes = info.channels * 2
+            val startByte = (startFrame * frameBytes).coerceIn(0, info.dataBytes / frameBytes * frameBytes)
+            raf.seek(info.dataOffset + startByte)
             val buffer = ByteArray(frameBytes * 8192)
-            var remaining = info.dataBytes
-            while (remaining > 0) {
+            var remaining = info.dataBytes - startByte
+            while (remaining > 0 && !done()) {
                 val n = raf.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt() / frameBytes * frameBytes)
                 if (n <= 0) break
                 remaining -= n
@@ -124,7 +162,13 @@ object AudioDecoder {
 
     // --- Compressed (m4a, mp3, ogg, ...) via MediaCodec -------------------------------------------
 
-    private fun decodeCompressed(file: File, onSamples: (FloatArray) -> Unit) {
+    private fun decodeCompressed(
+        file: File,
+        onSamples: (FloatArray) -> Unit,
+        startUs: Long = 0,
+        firstTimeUs: ((Long) -> Unit)? = null,
+        done: () -> Boolean = { false },
+    ) {
         val extractor = MediaExtractor()
         extractor.setDataSource(file.absolutePath)
         val track = (0 until extractor.trackCount).firstOrNull {
@@ -134,6 +178,8 @@ object AudioDecoder {
             throw IOException("No audio track in ${file.name}")
         }
         extractor.selectTrack(track)
+        if (startUs > 0) extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        var timed = firstTimeUs == null
         val inputFormat = extractor.getTrackFormat(track)
         val codec = MediaCodec.createDecoderByType(inputFormat.getString(MediaFormat.KEY_MIME)!!)
         try {
@@ -144,7 +190,7 @@ object AudioDecoder {
             var floatPcm = false
             val info = MediaCodec.BufferInfo()
             var inputDone = false
-            while (true) {
+            while (!done()) {
                 if (!inputDone) {
                     val inIndex = codec.dequeueInputBuffer(10_000)
                     if (inIndex >= 0) {
@@ -177,6 +223,10 @@ object AudioDecoder {
                             if (floatPcm) floatToMono(pcm, info.size, channels) else pcm16ToMono(pcm, info.size, channels)
                         } else {
                             null
+                        }
+                        if (mono != null && !timed) {
+                            timed = true
+                            firstTimeUs?.invoke(info.presentationTimeUs)
                         }
                         val endOfStream = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                         // Hand the buffer back before the callback, which may run for minutes (speaker detection).

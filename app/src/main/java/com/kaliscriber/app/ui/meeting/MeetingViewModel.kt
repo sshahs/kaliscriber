@@ -11,6 +11,9 @@ import com.kaliscriber.app.export.ExportTarget
 import com.kaliscriber.app.export.exportMessage
 import com.kaliscriber.app.speech.VoiceRecorder
 import com.kaliscriber.core.ai.CustomFormat
+import com.kaliscriber.app.share.ClipSharer
+import com.kaliscriber.core.clip.Clip
+import com.kaliscriber.core.clip.Clips
 import com.kaliscriber.core.ai.MeetingType
 import com.kaliscriber.core.ai.usage.UsageLedger
 import com.kaliscriber.core.ai.usage.UsageRecord
@@ -38,7 +41,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
-enum class Busy { INSIGHTS, GAPS, ASK, SPEAKERS, NAMES, RETRY, BRIEFING, EXPORT }
+enum class Busy { INSIGHTS, GAPS, ASK, SPEAKERS, NAMES, RETRY, BRIEFING, EXPORT, CLIP }
 
 /** Where the hands-free voice conversation is. */
 enum class VoicePhase { OFF, LISTENING, TRANSCRIBING, THINKING, SPEAKING }
@@ -342,6 +345,22 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         val selected = m.segments.filter { it.id in selection.value }
         selection.value = emptySet()
         return TranscriptFormatter.forPrompt(m, selected)
+    }
+
+    /** Cuts [clip] from the recording and opens the share sheet with it and what was said. */
+    fun shareClip(clip: Clip) = launchTask(Busy.CLIP) {
+        val m = meeting.value ?: return@launchTask
+        val audio = ClipSharer.make(container.appContext, m, clip)
+        if (audio == null && m.audioPath != null) _messages.send("Couldn't read the recording; sharing the words only")
+        ClipSharer.share(container.appContext, m, clip, audio)
+    }
+
+    /** A clip of the selected transcript lines. */
+    fun shareSelectionClip() {
+        val m = meeting.value ?: return
+        val clip = Clips.forLines(m.segments.filter { it.id in selection.value }, m.durationMs) ?: return
+        selection.value = emptySet()
+        shareClip(clip)
     }
 
     fun renameMeeting(title: String) = viewModelScope.launch { repo.rename(meetingId, title) }

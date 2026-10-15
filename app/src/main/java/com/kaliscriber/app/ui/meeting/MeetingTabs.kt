@@ -146,6 +146,7 @@ import com.kaliscriber.core.model.Speaker
 import com.kaliscriber.core.model.TranscriptSegment
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import com.kaliscriber.core.series.TalkStats
+import com.kaliscriber.core.clip.Clips
 import java.io.File
 
 /** Parses "mm:ss" or "h:mm:ss" (optionally in brackets) into milliseconds. */
@@ -291,7 +292,14 @@ fun SummaryTab(
                 SectionCard("Your bookmarks", Icons.Filled.Bookmark) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         meeting.bookmarks.forEach { mark ->
-                            BookmarkMarker(mark, onClick = { onOpenTranscriptAt((mark.atMs - BOOKMARK_LEAD_MS).coerceAtLeast(0)) })
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                BookmarkMarker(
+                                    mark,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = { onOpenTranscriptAt((mark.atMs - BOOKMARK_LEAD_MS).coerceAtLeast(0)) },
+                                )
+                                ClipButton(meeting, Busy.CLIP in busy) { vm.shareClip(Clips.forBookmark(mark.atMs, meeting.durationMs)) }
+                            }
                         }
                     }
                 }
@@ -307,16 +315,19 @@ fun SummaryTab(
                 SectionCard("Highlights", Icons.Filled.Star) {
                     insights.highlights.forEach { h ->
                         val at = parseTimestamp(h.timestamp)
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .then(if (at != null) Modifier.clickable { onOpenTranscriptAt(at) } else Modifier)
-                                .padding(vertical = 4.dp),
-                        ) {
-                            Text("“${h.text}”", style = MaterialTheme.typography.bodyMedium)
-                            val who = listOfNotNull(h.speaker, h.timestamp?.let { "at $it" }).joinToString(" ")
-                            if (who.isNotEmpty()) Text("— $who", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                            if (!h.why.isNullOrBlank()) Text(h.why!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.Top) {
+                            Column(
+                                Modifier
+                                    .weight(1f)
+                                    .then(if (at != null) Modifier.clickable(onClickLabel = "Play from here") { onOpenTranscriptAt(at) } else Modifier)
+                                    .padding(vertical = 4.dp),
+                            ) {
+                                Text("“${h.text}”", style = MaterialTheme.typography.bodyMedium)
+                                val who = listOfNotNull(h.speaker, h.timestamp?.let { "at $it" }).joinToString(" ")
+                                if (who.isNotEmpty()) Text("— $who", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                if (!h.why.isNullOrBlank()) Text(h.why!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (at != null) ClipButton(meeting, Busy.CLIP in busy) { vm.shareClip(Clips.around(at, meeting.durationMs)) }
                         }
                     }
                 }
@@ -382,6 +393,18 @@ fun SummaryTab(
             }
         }
         items(parts, key = { it.key }) { part -> part.content() }
+    }
+}
+
+/** Shares the audio around a moment (or just its words when the recording is gone). */
+@Composable
+private fun ClipButton(meeting: Meeting, busy: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = !busy) {
+        Icon(
+            Icons.Filled.Share,
+            contentDescription = if (meeting.audioPath != null) "Share an audio clip of this moment" else "Share what was said here",
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 
@@ -591,6 +614,9 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
                     }
                     TextButton(onClick = { clipboard.setText(AnnotatedString(vm.copySelectionText())) }) {
                         Icon(Icons.Filled.ContentCopy, null); Spacer(Modifier.width(4.dp)); Text("Copy")
+                    }
+                    TextButton(onClick = vm::shareSelectionClip) {
+                        Icon(Icons.Filled.Share, null); Spacer(Modifier.width(4.dp)); Text("Share clip")
                     }
                     IconButton(onClick = { vm.selection.value = emptySet() }) { Icon(Icons.Filled.Close, contentDescription = "Clear selection") }
                 }
