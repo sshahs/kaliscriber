@@ -13,7 +13,9 @@ import com.kaliscriber.app.data.Deletions
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.app.export.MeetingExporter
 import com.kaliscriber.app.importing.AudioImporter
+import com.kaliscriber.app.processing.AppVisibility
 import com.kaliscriber.app.processing.MeetingJobs
+import com.kaliscriber.app.processing.ReadyNotifier
 import com.kaliscriber.app.recording.RecordingManager
 import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.app.storage.StorageManager
@@ -71,7 +73,9 @@ class KaliScriberApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        registerActivityLifecycleCallbacks(container.visibility)
         createNotificationChannel()
+        ReadyNotifier.createChannel(this)
         TaskReminders.createChannel(this)
         RecapReminder.createChannel(this)
     }
@@ -92,6 +96,8 @@ class KaliScriberApp : Application() {
 class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** Whether the app is on screen. */
+    val visibility = AppVisibility()
 
     private val filesDir: File = appContext.filesDir
 
@@ -237,6 +243,17 @@ class AppContainer(context: Context) {
                 .map { it.taskReminders to it.reminderHour }
                 .distinctUntilChanged()
                 .collect { runCatching { TaskReminders.schedule(appContext, settings()) } }
+        }
+        // "Notes ready" when a meeting finishes processing while the app isn't on screen.
+        scope.launch {
+            var before: Map<String, MeetingStatus>? = null
+            meetings.meetings.collect { list ->
+                val previous = before
+                if (previous != null && !visibility.foreground) {
+                    list.filter { ReadyNotifier.finished(previous[it.id], it) }.forEach { ReadyNotifier.notify(appContext, it) }
+                }
+                before = list.associate { it.id to it.status }
+            }
         }
         scope.launch {
             settingsStore.value

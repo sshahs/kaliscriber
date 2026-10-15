@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.kaliscriber.app.processing.ReadyNotifier
 import com.kaliscriber.app.tasks.RecapReminder
 import com.kaliscriber.app.tasks.TaskReminders
 import com.kaliscriber.app.ui.AppNavigation
@@ -51,6 +52,10 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         if (intent.action == ACTION_RECORD || intent.getBooleanExtra(EXTRA_RECORD, false)) {
             container.launches.post(LaunchRequest.Record)
+            return
+        }
+        intent.getStringExtra(ReadyNotifier.EXTRA_OPEN_MEETING)?.let { id ->
+            container.launches.post(LaunchRequest.OpenMeeting(id))
             return
         }
         if (intent.getBooleanExtra(RecapReminder.EXTRA_OPEN_RECAP, false)) {
