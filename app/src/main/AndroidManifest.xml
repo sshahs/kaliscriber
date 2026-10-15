@@ -50,20 +50,25 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Share a recording (or a video of a call) to transcribe it. -->
+            <!-- Share a recording, a video of a call or a call transcript (Zoom, Teams, Meet) to import it. -->
             <intent-filter android:label="@string/share_label">
                 <action android:name="android.intent.action.SEND" />
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="audio/*" />
                 <data android:mimeType="video/*" />
+                <data android:mimeType="text/vtt" />
+                <data android:mimeType="application/x-subrip" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
             </intent-filter>
-            <!-- "Open with" for audio files. -->
+            <!-- "Open with" for audio files and transcripts. -->
             <intent-filter android:label="@string/share_label">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" />
                 <data android:mimeType="audio/*" />
+                <data android:mimeType="text/vtt" />
+                <data android:mimeType="application/x-subrip" />
             </intent-filter>
         </activity>
 

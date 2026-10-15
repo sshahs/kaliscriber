@@ -29,6 +29,7 @@ import com.kaliscriber.core.speakers.VoiceLibrary
 import com.kaliscriber.core.store.MeetingRepository
 import com.kaliscriber.core.tasks.ActionItems
 import com.kaliscriber.core.transcript.Glossary
+import com.kaliscriber.core.transcript.TranscriptFiles
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.util.Ids
@@ -426,6 +427,28 @@ class MeetingPipeline(
             return
         }
         analyze(meetingId, aiSeparation = detection != Detection.FAILED)
+    }
+
+    /**
+     * Makes [meetingId] from a transcript another app wrote ([TranscriptFiles]): its lines, with the
+     * speakers it names, then the usual AI steps. Without speaker names the AI separates speakers.
+     */
+    suspend fun importTranscript(meetingId: String, parsed: TranscriptFiles.Parsed) {
+        val started = clock.now()
+        val named = parsed.lines.any { it.speakerLabel != null }
+        replaceTranscript(meetingId, SttResult(parsed.lines, diarized = named), parsed.lines.maxOfOrNull { it.endMs })
+        repo.update(meetingId) { m ->
+            m.copy(
+                // Names from the file are real; "Speaker 1" and the like keep a placeholder for the AI to name.
+                speakers = m.speakers.map { s ->
+                    val label = s.label?.takeIf { it != SpeakerAssigner.UNKNOWN_LABEL && TranscriptFiles.isRealName(it) }
+                    if (label != null) s.copy(name = label, isPlaceholder = false) else s
+                },
+                lastError = null,
+            )
+        }
+        addToTimeline(meetingId, "Transcript imported", started)
+        analyze(meetingId, aiSeparation = !named)
     }
 
     /** How a speaker detection pass went. */

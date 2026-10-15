@@ -72,6 +72,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kaliscriber.core.transcript.TranscriptFiles
 import com.kaliscriber.app.LaunchRequest
 import com.kaliscriber.app.appContainer
 import com.kaliscriber.app.appViewModel
@@ -88,6 +89,11 @@ import com.kaliscriber.core.transcript.TranscriptFormatter
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
+
+/** What the import button offers: recordings, videos of calls, and transcripts from Zoom, Teams or Meet. */
+private val IMPORT_TYPES = arrayOf(
+    "audio/*", "video/*", "text/*", "application/x-subrip", TranscriptFiles.DOCX_MIME, "application/octet-stream",
+)
 
 @Composable
 fun HomeScreen(
@@ -151,7 +157,7 @@ fun HomeScreen(
 
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
-            snackbar.showSnackbar("Importing audio…")
+            snackbar.showSnackbar("Importing…")
             vm.importAudio(uri)
                 .onSuccess(onOpenMeeting)
                 .onFailure { snackbar.showSnackbar(it.message ?: "Import failed") }
@@ -169,8 +175,8 @@ fun HomeScreen(
                     IconButton(onClick = onOpenRecap) {
                         Icon(Icons.Filled.DateRange, contentDescription = "Weekly recap")
                     }
-                    IconButton(onClick = { importer.launch(arrayOf("audio/*", "video/mp4")) }) {
-                        Icon(Icons.Filled.AudioFile, contentDescription = "Import audio")
+                    IconButton(onClick = { importer.launch(IMPORT_TYPES) }) {
+                        Icon(Icons.Filled.AudioFile, contentDescription = "Import a recording or transcript")
                     }
                     IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
                 },
