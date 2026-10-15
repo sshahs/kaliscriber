@@ -18,6 +18,7 @@ import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
+import com.kaliscriber.core.series.MeetingSeries
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -64,6 +66,11 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
     val recordingPending: StateFlow<Boolean> = container.deletions.pending
         .map { list -> list.any { it.id == meetingId && it.kind == Deletions.Kind.RECORDING } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** What the previous meeting in this one's series left behind; null when there is none. */
+    val sinceLast: StateFlow<MeetingSeries.SinceLast?> = combine(meeting, repo.meetings) { m, all ->
+        m?.let { MeetingSeries.sinceLast(it, all) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Transcript segments selected with a long press. */
     val selection = MutableStateFlow<Set<String>>(emptySet())

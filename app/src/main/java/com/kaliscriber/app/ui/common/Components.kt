@@ -61,7 +61,22 @@ import com.kaliscriber.app.ui.theme.speakerColor
 import com.kaliscriber.core.model.Bookmark
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.Speaker
+import com.kaliscriber.core.library.Initials
 import com.kaliscriber.core.transcript.TranscriptFormatter
+
+/** A round avatar with the speaker's initials in their colour; decorative, since their name is shown beside it. */
+@Composable
+fun SpeakerAvatar(speaker: Speaker?, modifier: Modifier = Modifier.size(32.dp)) {
+    val color = speaker?.let { speakerColor(it.colorIndex) } ?: MaterialTheme.colorScheme.outline
+    Box(modifier.clip(CircleShape).background(color.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+        Text(
+            Initials.of(speaker?.name ?: "?"),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = color,
+        )
+    }
+}
 
 @Composable
 fun SpeakerBadge(speaker: Speaker?, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {

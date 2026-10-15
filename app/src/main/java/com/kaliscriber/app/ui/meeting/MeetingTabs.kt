@@ -143,6 +143,7 @@ import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Speaker
 import com.kaliscriber.core.model.TranscriptSegment
 import com.kaliscriber.core.transcript.TranscriptFormatter
+import com.kaliscriber.core.series.TalkStats
 import java.io.File
 
 /** Parses "mm:ss" or "h:mm:ss" (optionally in brackets) into milliseconds. */
@@ -192,8 +193,16 @@ private val Meeting.isProcessing get() = status == MeetingStatus.TRANSCRIBING ||
 private class SummaryPart(val key: String, val chip: String?, val content: @Composable () -> Unit)
 
 @Composable
-fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTranscriptAt: (Long) -> Unit) {
+fun SummaryTab(
+    meeting: Meeting,
+    busy: Set<Busy>,
+    vm: MeetingViewModel,
+    onOpenTranscriptAt: (Long) -> Unit,
+    onOpenMeeting: (String) -> Unit = {},
+) {
     val insights = meeting.insights
+    val since by vm.sinceLast.collectAsStateWithLifecycle()
+    val talk = remember(meeting.segments, meeting.speakers) { TalkStats.of(meeting) }
     if (insights == null) {
         if (meeting.isProcessing || Busy.INSIGHTS in busy) {
             EmptyState(Icons.Filled.AutoAwesome, "Working on it", "The summary, action items and highlights will appear here.") {
@@ -214,6 +223,9 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
     val parts = buildList {
         if (insights.summary.isNotBlank()) {
             add(SummaryPart("summary", null) { SectionCard("Summary", Icons.Filled.Subject) { MarkdownText(insights.summary) } })
+        }
+        since?.let { last ->
+            add(SummaryPart("since", "Since last time") { SinceLastCard(last, onOpenMeeting) })
         }
         if (insights.actionItems.isNotEmpty()) {
             val open = insights.actionItems.count { !it.done }
@@ -297,6 +309,9 @@ fun SummaryTab(meeting: Meeting, busy: Set<Busy>, vm: MeetingViewModel, onOpenTr
             add(SummaryPart("risks", "Risks ${insights.risks.size}") {
                 SectionCard("Risks & concerns", Icons.Filled.Warning) { BulletList(insights.risks) }
             })
+        }
+        if (talk != null && talk.people.size > 1) {
+            add(SummaryPart("talk", "Talk time") { TalkTimeCard(meeting, talk) })
         }
         if (insights.topics.isNotEmpty()) {
             add(SummaryPart("topics", "Topics ${insights.topics.size}") {

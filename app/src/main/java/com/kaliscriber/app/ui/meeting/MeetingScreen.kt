@@ -118,6 +118,8 @@ fun MeetingScreen(
     onOpenSettings: () -> Unit,
     /** Opens one page of Settings, where an error's fix is. */
     onOpenSettingsPage: (SettingsPage) -> Unit = { onOpenSettings() },
+    /** Opens another meeting, e.g. the previous one in a series. */
+    onOpenMeeting: (String) -> Unit = {},
 ) {
     val vm = appViewModel(key = "meeting-$meetingId") { MeetingViewModel(it, meetingId) }
     val meeting by vm.meeting.collectAsStateWithLifecycle()
@@ -248,7 +250,7 @@ fun MeetingScreen(
                 }
             }
             when (tab) {
-                0 -> SummaryTab(m, busy, vm, onOpenTranscriptAt = { ms -> vm.player.seekTo(ms) })
+                0 -> SummaryTab(m, busy, vm, onOpenTranscriptAt = { ms -> vm.player.seekTo(ms) }, onOpenMeeting = onOpenMeeting)
                 1 -> TranscriptTab(m, vm, focusSegmentId = focusSegmentId, onAskAboutSelection = {
                     vm.askAboutSelection()
                     tab = 2

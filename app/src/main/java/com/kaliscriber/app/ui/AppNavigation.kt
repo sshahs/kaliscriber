@@ -141,6 +141,7 @@ fun AppNavigation(openTasks: Boolean = false) {
                 onOpenNote = { nav.navigate(Routes.note(it)) },
                 onOpenSettings = { nav.navigate(Routes.settings()) },
                 onOpenSettingsPage = { nav.navigate(Routes.settings(it)) },
+                onOpenMeeting = { nav.navigate(Routes.meeting(it)) },
             )
         }
         composable(Routes.NOTE, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
