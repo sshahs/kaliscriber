@@ -4,6 +4,13 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 
 ## Features
 
+**Getting around**
+- A **setup wizard** on first run: on-device or cloud transcription (with the model download), your AI provider and key with a test, permissions, and a test recording.
+- **Bottom navigation** for Meetings, Notes, Tasks and People. Meetings are grouped by day and can be filtered by person, summary format or needing attention.
+- **Undo instead of confirmations**: swipe left to delete a meeting or note; deleting a recording or merging speakers can be undone for a few seconds too.
+- **Errors point to the fix** (the right Settings page, or Try again), and a notification says when a meeting's notes are ready.
+- **Settings** opens on seven pages with a search box.
+
 **Meetings**
 - Record meetings in a foreground service (keeps going with the screen off) with a **live transcript** that updates every few seconds.
 - **Speaker detection.** When the app can't tell who is speaking, it gives that speaker a **random placeholder name** (e.g. *Amber Falcon*). You can rename speakers at any time, accept AI name suggestions ("AI thinks this is Priya, who introduced herself at 00:12"), merge two speakers, or move selected lines to another or a new speaker.
@@ -11,7 +18,8 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - **Insights:** summary, action items (with owner, due date and priority, which you can tick off), key points, decisions, highlights (tap to play that moment), topics, risks, next steps and tone.
 - **Summary formats** for 1:1s, stand-ups, sales calls, interviews and lectures add sections that matter for that kind of meeting (e.g. done, next and blockers per person at a stand-up). The format is guessed from the meeting or calendar title and can be changed on the summary.
 - **Ask AI** about the meeting, or about a part of it: long-press lines in the transcript, then tap *Ask AI*. Answers cite timestamps and appear as the AI writes them; *Stop* ends an answer early and keeps what arrived.
-- **Search all meetings:** the search box on the home screen looks through titles, people, summaries, action items and every transcript line, with word forms matched ("price" finds "pricing"). Tap a result to open the transcript at that line.
+- **Find in transcript:** highlight matches, step through them, or show one speaker's lines.
+- **Search all meetings:** the search box on the home screen (which also asks the AI when you type a question) looks through titles, people, summaries, action items and every transcript line, with word forms matched ("price" finds "pricing"). Tap a result to open the transcript at that line.
 - **Ask all meetings:** ask a question about everything you've recorded ("What did we decide about pricing last month?"). The app finds the relevant meetings and passages, the AI answers from them, and each answer lists its sources. Tap a source to jump to that moment. With **smart search** (Settings, an optional 30 MB on-device model) it also finds passages by meaning, so a question about cost finds talk about prices.
 - **Weekly recap** (the calendar button on the home screen): the AI's account of a week of meetings, written from their notes (what happened, decisions, themes, risks and what to follow up), with the week's open action items by person and what's due next week. Share it as Markdown, have it read aloud, or get it as a notification on Friday afternoons (Settings → Reminders).
 - **Tasks:** every action item from every meeting in one list, grouped into overdue, due today, next 7 days, later and no date. Filter by person, tick items off, or edit the task, owner and due date. Edits and ticks are kept when a summary is regenerated. An optional daily reminder (Settings → Action item reminders) lists what's overdue or due that day.
