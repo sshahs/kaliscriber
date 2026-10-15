@@ -114,6 +114,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             item { ActiveServices(settings, keys, vm) }
             item { LocalSpeechSection(settings, modelStates, vm) }
             item { VoiceMemorySection(settings, modelStates, vm) }
+            item { SmartSearchSection(modelStates, vm) }
             item { ReminderSection(settings, vm) }
             item { GlossarySection(settings, vm) }
             item {
@@ -321,6 +322,29 @@ private fun VoiceMemorySection(settings: AppSettings, states: Map<String, ModelS
                 }
                 IconButton(onClick = { vm.deleteVoice(voice.id) }) { Icon(Icons.Filled.Delete, contentDescription = "Forget ${voice.name}") }
             }
+        }
+    }
+}
+
+@Composable
+private fun SmartSearchSection(states: Map<String, ModelState>, vm: SettingsViewModel) {
+    val model = ModelCatalog.searchModel
+    val state = states[model.id] ?: ModelState.NotDownloaded
+    SectionCard("Smart search") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Ask all meetings also finds passages by meaning, so \"what did it cost?\" finds talk about prices and budgets. " +
+                        "Runs on this phone (${model.downloadMb} MB, English).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ModelStateLine(state)
+                vm.searchModelError()?.let {
+                    Text("Couldn't load the model: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            ModelAction(state, onDownload = { vm.downloadModel(model) }, onCancel = { vm.cancelModel(model) }, onDelete = { vm.deleteModel(model) })
         }
     }
 }

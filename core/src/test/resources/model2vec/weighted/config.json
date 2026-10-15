@@ -1,0 +1,6 @@
+{
+    "max_length": 512,
+    "normalize": true,
+    "embedding_dtype": "float16",
+    "vocabulary_quantization": 9
+}

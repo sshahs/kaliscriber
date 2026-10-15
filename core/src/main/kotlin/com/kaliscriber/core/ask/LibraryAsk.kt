@@ -67,7 +67,7 @@ class LibraryAsk(
         val lastQuestion = previous.lastOrNull { it.role == ChatRole.USER && !it.isError }?.content
         val keywords = (expandKeywords(question) + MeetingSearch.terms(question) + MeetingSearch.terms(lastQuestion.orEmpty())).distinct()
         val budget = settings().maxTranscriptChars.coerceAtMost(CONTEXT_BUDGET)
-        val sources = MeetingSearch.retrieve(all, corpus(), keywords, budget)
+        val sources = MeetingSearch.retrieve(all, corpus(), keywords, budget, question = question)
         val context = sources.joinToString("\n") { MeetingSearch.render(it, Prompts::formatDate) }
 
         val turns = previous.filter { !it.isError }.takeLast(10).map {

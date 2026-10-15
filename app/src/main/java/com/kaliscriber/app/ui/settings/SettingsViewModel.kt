@@ -95,6 +95,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun cancelModel(model: LocalModel) = container.models.cancel(model)
 
+    fun searchModelError(): String? = container.searchModelError
+
     fun deleteModel(model: LocalModel) {
         viewModelScope.launch {
             container.localSpeech.unload()

@@ -1,7 +1,7 @@
 package com.kaliscriber.app.speech
 
 /** What a downloadable on-device model is used for. */
-enum class ModelRole { ASR, VAD, SEGMENTATION, EMBEDDING }
+enum class ModelRole { ASR, VAD, SEGMENTATION, EMBEDDING, SEARCH }
 
 enum class AsrFamily { WHISPER, PARAKEET, SENSE_VOICE }
 
@@ -16,6 +16,8 @@ data class LocalModel(
     val family: AsrFamily? = null,
     /** Whisper models with a fixed language ("*.en"). */
     val englishOnly: Boolean = false,
+    /** Small files downloaded next to the main one (e.g. a tokenizer and config). */
+    val extraUrls: List<String> = emptyList(),
 ) {
     val isArchive: Boolean get() = url.endsWith(".tar.bz2")
 }
@@ -85,7 +87,17 @@ object ModelCatalog {
 
     val diarization = listOf(segmentation, embedding)
 
-    val all: List<LocalModel> = asrModels + vad + diarization
+    private const val POTION = "https://huggingface.co/minishlab/potion-base-8M/resolve/main"
+
+    /** Model2Vec potion-base-8M: finds meeting passages by meaning for Ask all meetings (MIT licence). */
+    val searchModel = LocalModel(
+        "potion-base-8m", "Smart search (potion-base-8M)",
+        "Finds passages by meaning, not just matching words, when you ask across all meetings. English.",
+        ModelRole.SEARCH, "$POTION/model.safetensors", 30,
+        extraUrls = listOf("$POTION/tokenizer.json", "$POTION/config.json"),
+    )
+
+    val all: List<LocalModel> = asrModels + vad + diarization + searchModel
 
     fun byId(id: String): LocalModel? = all.firstOrNull { it.id == id }
 

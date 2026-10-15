@@ -34,6 +34,8 @@ import com.kaliscriber.core.model.MeetingStatus
 import com.kaliscriber.core.model.Note
 import com.kaliscriber.core.pipeline.MeetingPipeline
 import com.kaliscriber.core.search.SearchIndexer
+import com.kaliscriber.core.search.StaticEmbeddingModel
+import com.kaliscriber.core.search.TextEmbedder
 import com.kaliscriber.core.search.TranscriptIndex
 import com.kaliscriber.core.speakers.VoiceLibrary
 import com.kaliscriber.core.speakers.VoiceProfile
@@ -46,6 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -99,7 +102,34 @@ class AppContainer(context: Context) {
     /** Meetings in files/meetings, their transcripts in files/transcripts and audio in files/audio. */
     val meetings = MeetingRepository.inDir(filesDir)
     /** Full-text index of every transcript line, so search doesn't need transcripts in memory. */
-    val searchIndex by lazy { TranscriptIndex(AndroidSqlDb(appContext.getDatabasePath("search.db"))) }
+    val searchIndex by lazy { TranscriptIndex(AndroidSqlDb(appContext.getDatabasePath("search.db")), ::textEmbedder) }
+    /** Keeps [searchIndex] up to date. */
+    val searchIndexer by lazy { SearchIndexer(meetings, searchIndex, scope, log = { Log.i("KaliScriber", it) }) }
+
+    @Volatile private var searchModel: StaticEmbeddingModel? = null
+
+    /** Why the smart search model couldn't be loaded, if it couldn't. */
+    @Volatile var searchModelError: String? = null
+        private set
+
+    /** The on-device model that finds passages by meaning, once downloaded; null until then. */
+    fun textEmbedder(): TextEmbedder? {
+        searchModel?.let { return it }
+        val spec = ModelCatalog.searchModel
+        if (!models.isReady(spec)) return null
+        return synchronized(this) {
+            searchModel ?: try {
+                StaticEmbeddingModel.load(models.dir(spec), id = spec.id).also {
+                    searchModel = it
+                    searchModelError = null
+                }
+            } catch (e: Exception) {
+                Log.w("KaliScriber", "Smart search model couldn't be loaded", e)
+                searchModelError = e.message ?: e.javaClass.simpleName
+                null
+            }
+        }
+    }
     val notes = NoteRepository(JsonDocumentStore(File(filesDir, "notes"), Note.serializer()) { it.id })
     /** Remembered voices (on-device voiceprints) for recognising people across meetings. */
     val voices = VoiceLibrary(
@@ -147,7 +177,18 @@ class AppContainer(context: Context) {
         val metered = runCatching { appContext.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered }.getOrDefault(true)
         if (speakerPackMissing && models.readyAsrModels().isNotEmpty() && !metered) models.downloadDiarization()
         // Index transcripts for search in the background (all of them the first time).
-        scope.launch(Dispatchers.IO) { SearchIndexer(meetings, searchIndex, scope, log = { Log.i("KaliScriber", it) }).start() }
+        scope.launch(Dispatchers.IO) { searchIndexer.start() }
+        // Once the smart search model is downloaded (or deleted), passages are embedded again.
+        scope.launch {
+            models.states
+                .map { it[ModelCatalog.searchModel.id] is ModelState.Ready }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { ready ->
+                    if (!ready) searchModel = null
+                    searchIndexer.refresh()
+                }
+        }
         // The Quick Settings tile and home-screen widget show whether a meeting is being recorded.
         scope.launch {
             recorder.state

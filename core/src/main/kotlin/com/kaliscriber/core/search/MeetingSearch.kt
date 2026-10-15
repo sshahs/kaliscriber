@@ -86,14 +86,29 @@ object MeetingSearch {
         keywords: List<String>,
         budgetChars: Int,
         maxMeetings: Int = 8,
+        /** The question itself, to also find passages by meaning when the corpus can. */
+        question: String? = null,
     ): List<Source> {
         val query = keywords.joinToString(" ")
         val terms = terms(query)
         val ranked = if (terms.isEmpty()) emptyList() else search(meetings, corpus, query, maxHits = Int.MAX_VALUE)
-        val chosen = if (ranked.isEmpty()) {
+        val byId = meetings.associateBy { it.id }
+        val similar = question?.let { corpus.similar(it, SIMILAR_PASSAGES) }.orEmpty()
+            .filter { it.meetingId in byId && it.score >= MIN_SIMILARITY }
+        val similarByMeeting = similar.groupBy { it.meetingId }
+
+        // Reciprocal rank fusion: meetings near the top of either list come first.
+        val fused = HashMap<String, Double>()
+        ranked.forEachIndexed { rank, r -> fused[r.meeting.id] = (fused[r.meeting.id] ?: 0.0) + 1.0 / (RRF_K + rank) }
+        similarByMeeting.keys.sortedByDescending { id -> similarByMeeting.getValue(id).maxOf { it.score } }
+            .forEachIndexed { rank, id -> fused[id] = (fused[id] ?: 0.0) + 1.0 / (RRF_K + rank) }
+        val lexical = ranked.associateBy { it.meeting.id }
+        val chosen = if (fused.isEmpty()) {
             meetings.sortedByDescending { it.createdAt }.take(15).map { Result(it, 0.0, emptyList()) }
         } else {
-            ranked.take(maxMeetings)
+            fused.entries.sortedByDescending { it.value }.take(maxMeetings).map { (id, score) ->
+                lexical[id] ?: Result(byId.getValue(id), score, emptyList())
+            }
         }
         var used = 0
         val sources = mutableListOf<Source>()
@@ -102,13 +117,20 @@ object MeetingSearch {
             val label = "M${i + 1}"
             used += header(label, meeting).length
             val taken = sortedMapOf<Int, TranscriptSegment>()
+            fun take(from: Int, to: Int) {
+                val fresh = corpus.lines(meeting.id, from.coerceAtLeast(0), to).filter { it.index !in taken }
+                used += fresh.sumOf { it.text.length + 30 }
+                fresh.forEach { taken[it.index] = it.toSegment() }
+            }
+            // Matching lines with their neighbours, then passages that match by meaning.
             for (hit in result.hits) {
                 if (used >= budgetChars) break
                 val center = hit.lineIndex ?: continue
-                val fresh = corpus.lines(meeting.id, (center - 1).coerceAtLeast(0), center + 1).filter { it.index !in taken }
-                if (fresh.isEmpty()) continue
-                used += fresh.sumOf { it.text.length + 30 }
-                fresh.forEach { taken[it.index] = it.toSegment() }
+                take(center - 1, center + 1)
+            }
+            for (passage in similarByMeeting[meeting.id].orEmpty()) {
+                if (used >= budgetChars) break
+                take(passage.first, passage.last)
             }
             sources += Source(label, meeting, runs(taken))
             if (used >= budgetChars) return sources
@@ -168,6 +190,13 @@ object MeetingSearch {
 
     /** Most transcript lines considered per search; the newest meetings' lines come first. */
     private const val MAX_CANDIDATES = 5_000
+
+    /** Passages found by meaning for a question, and how alike they must be to count. */
+    private const val SIMILAR_PASSAGES = 12
+    private const val MIN_SIMILARITY = 0.25f
+
+    /** The usual constant for reciprocal rank fusion. */
+    private const val RRF_K = 60.0
 
     /** A light English stemmer: drops common endings so word forms match. */
     private fun stem(word: String): String {

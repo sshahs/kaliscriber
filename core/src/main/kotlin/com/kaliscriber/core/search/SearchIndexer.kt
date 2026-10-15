@@ -44,17 +44,33 @@ class SearchIndexer(
         }
     }
 
-    /** Indexes meetings whose transcript changed since they were indexed, and forgets deleted ones. */
+    /** Catches up again, e.g. once a search model has been downloaded and passages can be embedded. */
+    fun refresh(): Job = scope.launch(Dispatchers.IO) {
+        try {
+            catchUp()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log("Search index: catching up failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Indexes meetings whose transcript changed since they were indexed, or whose passages were
+     * embedded with another model (or none), and forgets deleted meetings.
+     */
     suspend fun catchUp() {
-        val indexed = index.versions()
+        val indexed = index.states()
+        val model = index.embedderId()
         val meetings = repo.all()
         val ids = meetings.mapTo(HashSet()) { it.id }
         for (gone in indexed.keys - ids) write { index.remove(gone) }
         var count = 0
         for (m in meetings) {
+            val state = indexed[m.id]
             when {
-                !m.hasTranscript -> if (m.id in indexed) write { index.remove(m.id) }
-                indexed[m.id] != m.stats.version -> {
+                !m.hasTranscript -> if (state != null) write { index.remove(m.id) }
+                state == null || state.version != m.stats.version || state.embeddedWith != model -> {
                     val full = repo.peek(m.id) ?: continue
                     write { index.reindex(full) }
                     count++

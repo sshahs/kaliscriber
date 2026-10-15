@@ -162,6 +162,13 @@ class ModelManager(context: Context, http: OkHttpClient, private val scope: Coro
                 File(target, model.url.substringAfterLast('/')).outputStream().use { out -> counting.copyTo(out, BUFFER) }
             }
         }
+        for (url in model.extraUrls) {
+            http.newCall(Request.Builder().url(url).build()).execute().use {
+                if (!it.isSuccessful) throw IOException("Download failed (${it.code}) for ${model.name}")
+                val body = it.body ?: throw IOException("Empty download for ${model.name}")
+                File(target, url.substringAfterLast('/')).outputStream().use { out -> body.byteStream().copyTo(out, BUFFER) }
+            }
+        }
         if (target.listFiles().orEmpty().none { it.length() > 0 }) throw IOException("${model.name} archive was empty")
         File(target, READY_MARKER).writeText(model.url)
     }
