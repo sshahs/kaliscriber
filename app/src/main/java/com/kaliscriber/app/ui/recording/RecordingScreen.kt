@@ -211,6 +211,7 @@ private fun RecorderHeader(state: RecordingState.Recording, onPause: () -> Unit,
             textAlign = TextAlign.Center,
         )
         LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(6.dp))
+        state.micNote?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Text(
             when {
                 state.paused -> "Paused"

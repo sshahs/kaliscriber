@@ -83,6 +83,7 @@ import com.kaliscriber.app.ui.common.DropdownSelector
 import com.kaliscriber.app.ui.common.SectionCard
 import com.kaliscriber.core.ai.ApiKind
 import com.kaliscriber.core.ai.AppSettings
+import com.kaliscriber.core.ai.Microphone
 import com.kaliscriber.core.ai.ProviderId
 import com.kaliscriber.core.ai.TtsEngine
 import com.kaliscriber.core.ai.stt.SttClients
@@ -873,6 +874,19 @@ private fun ProviderCard(
 @Composable
 private fun ProcessingSettings(settings: AppSettings, vm: SettingsViewModel) {
     SectionCard("Meeting processing") {
+        ToggleRow(
+            "Clean up audio while recording",
+            "Android's noise suppression and automatic volume, which help with a noisy room and quiet voices. " +
+                "Turn off if transcripts get worse on your phone.",
+            settings.audioCleanup,
+        ) { v -> vm.update { it.copy(audioCleanup = v) } }
+        DropdownSelector(
+            label = "Microphone",
+            options = Microphone.entries,
+            selected = settings.microphone,
+            optionLabel = { it.label },
+            onSelect = { mic -> vm.update { it.copy(microphone = mic) } },
+        )
         var chunkSeconds by remember(settings.chunkSeconds) { mutableIntStateOf(settings.chunkSeconds) }
         Text("Live transcript update interval: ${chunkSeconds}s", style = MaterialTheme.typography.bodyMedium)
         Text(

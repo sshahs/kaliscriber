@@ -182,6 +182,10 @@ data class AppSettings(
     /** Rough cap on transcript characters sent to the LLM in one request. */
     val maxTranscriptChars: Int = 400_000,
     val export: ExportSettings = ExportSettings(),
+    /** Android's noise suppression and automatic volume while recording. */
+    val audioCleanup: Boolean = true,
+    /** Which microphone to record meetings with. */
+    val microphone: Microphone = Microphone.AUTO,
     /** Prices the user entered, per "provider/model", to estimate what AI requests cost. */
     val modelPrices: Map<String, com.kaliscriber.core.ai.usage.ModelPrice> = emptyMap(),
     /**
@@ -261,4 +265,14 @@ data class ProviderConfig(
 /** Supplies API keys, which the Android app keeps encrypted with the Android Keystore. */
 fun interface SecretProvider {
     fun apiKey(id: ProviderId): String?
+}
+
+/** The microphone meetings are recorded with; AUTO lets Android choose. */
+@Serializable
+enum class Microphone(val label: String) {
+    AUTO("Automatic"),
+    PHONE("Phone"),
+    WIRED("Wired headset"),
+    USB("USB microphone"),
+    BLUETOOTH("Bluetooth headset"),
 }

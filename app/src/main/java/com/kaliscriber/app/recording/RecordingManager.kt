@@ -35,6 +35,8 @@ sealed interface RecordingState {
         val level: Float = 0f,
         /** Chunks captured but not yet transcribed. */
         val queuedChunks: Int = 0,
+        /** Which microphone is in use, when the user chose one. */
+        val micNote: String? = null,
     ) : RecordingState
 
     /** Capture stopped; the final transcription and AI analysis are running. */
@@ -94,6 +96,9 @@ class RecordingManager(
         queued.set(0)
 
         val captureEngine = AudioCaptureEngine(
+            context = context,
+            cleanup = settings().audioCleanup,
+            microphone = settings().microphone,
             outputFile = file,
             chunkDir = File(dir, "chunks"),
             chunkMillis = settings().chunkSeconds.coerceIn(10, 300) * 1000L,
@@ -136,7 +141,7 @@ class RecordingManager(
                 updateRecording { it.copy(queuedChunks = queued.get()) }
             }
         }
-        _state.value = RecordingState.Recording(meetingId)
+        _state.value = RecordingState.Recording(meetingId, micNote = captureEngine.micNote)
         return true
     }
 

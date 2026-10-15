@@ -1,14 +1,22 @@
 package com.kaliscriber.app.recording
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaRecorder
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
+import android.os.Build
 import android.util.Log
+import com.kaliscriber.core.ai.Microphone
 import com.kaliscriber.core.audio.Wav
 import com.kaliscriber.core.model.AudioChunk
 import java.io.ByteArrayOutputStream
@@ -24,10 +32,14 @@ import kotlin.math.sqrt
  *   transcription.
  */
 class AudioCaptureEngine(
+    private val context: Context,
     private val outputFile: File,
     private val chunkDir: File,
     private val chunkMillis: Long,
     private val listener: Listener,
+    /** Android's noise suppression and automatic volume, where the phone has them. */
+    private val cleanup: Boolean = true,
+    private val microphone: Microphone = Microphone.AUTO,
 ) {
     interface Listener {
         fun onChunk(chunk: AudioChunk)
@@ -42,13 +54,23 @@ class AudioCaptureEngine(
 
     private var thread: Thread? = null
     private var record: AudioRecord? = null
+    private val effects = mutableListOf<AudioEffect>()
+    private val audioManager: AudioManager? = context.getSystemService(AudioManager::class.java)
+    private var bluetoothRouted = false
+
+    /** Which microphone is in use, when the user chose one, e.g. "Bluetooth headset not connected; using the phone". */
+    var micNote: String? = null
+        private set
 
     @SuppressLint("MissingPermission") // Checked by the UI before recording starts.
     fun start() {
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minBuffer <= 0) throw IOException("The microphone is not available")
+        val device = preferredDevice()
+        val bluetooth = device != null && device.type in bluetoothTypes()
         val rec = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            // Bluetooth headset microphones only work on the voice-call path.
+            if (bluetooth) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.MIC,
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -58,6 +80,16 @@ class AudioCaptureEngine(
             rec.release()
             throw IOException("Could not open the microphone. Is another app using it?")
         }
+        if (device != null) {
+            if (bluetooth) routeToBluetooth(device)
+            rec.setPreferredDevice(device)
+        }
+        micNote = when {
+            microphone == Microphone.AUTO -> null
+            device == null -> "${microphone.label} not connected; using the phone's microphone"
+            else -> "Microphone: ${device.productName?.toString()?.takeIf { it.isNotBlank() } ?: microphone.label}"
+        }
+        if (cleanup) addCleanup(rec.audioSessionId)
         try {
             rec.startRecording()
         } catch (e: Exception) {
@@ -75,12 +107,73 @@ class AudioCaptureEngine(
         running = false
         thread?.join(10_000)
         thread = null
+        effects.forEach { runCatching { it.release() } }
+        effects.clear()
         record?.let {
             runCatching { it.stop() }
             it.release()
         }
         record = null
+        if (bluetoothRouted) releaseBluetooth()
         return capturedMs
+    }
+
+    /** The connected input matching the user's choice, or null for Android's default. */
+    private fun preferredDevice(): AudioDeviceInfo? {
+        val types = when (microphone) {
+            Microphone.AUTO -> return null
+            Microphone.PHONE -> setOf(AudioDeviceInfo.TYPE_BUILTIN_MIC)
+            Microphone.WIRED -> setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET)
+            Microphone.USB -> setOf(AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY)
+            Microphone.BLUETOOTH -> bluetoothTypes()
+        }
+        return audioManager?.getDevices(AudioManager.GET_DEVICES_INPUTS)?.firstOrNull { it.type in types }
+    }
+
+    private fun bluetoothTypes(): Set<Int> = buildSet {
+        add(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(AudioDeviceInfo.TYPE_BLE_HEADSET)
+    }
+
+    private fun routeToBluetooth(device: AudioDeviceInfo) {
+        val am = audioManager ?: return
+        bluetoothRouted = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                am.setCommunicationDevice(device)
+            } else {
+                @Suppress("DEPRECATION")
+                am.startBluetoothSco()
+                @Suppress("DEPRECATION")
+                am.isBluetoothScoOn = true
+                true
+            }
+        }.onFailure { Log.w(TAG, "Couldn't route the microphone to Bluetooth", it) }.getOrDefault(false)
+    }
+
+    private fun releaseBluetooth() {
+        val am = audioManager ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                am.clearCommunicationDevice()
+            } else {
+                @Suppress("DEPRECATION")
+                am.isBluetoothScoOn = false
+                @Suppress("DEPRECATION")
+                am.stopBluetoothSco()
+            }
+        }
+        bluetoothRouted = false
+    }
+
+    /** Noise suppression and automatic gain, which help with distant voices and a noisy room. */
+    private fun addCleanup(session: Int) {
+        if (NoiseSuppressor.isAvailable()) {
+            runCatching { NoiseSuppressor.create(session)?.also { it.setEnabled(true); effects += it } }
+        }
+        if (AutomaticGainControl.isAvailable()) {
+            runCatching { AutomaticGainControl.create(session)?.also { it.setEnabled(true); effects += it } }
+        }
+        Log.i(TAG, "Audio clean-up: ${effects.joinToString { it.javaClass.simpleName }.ifEmpty { "not available on this phone" }}")
     }
 
     private fun captureLoop(rec: AudioRecord) {
