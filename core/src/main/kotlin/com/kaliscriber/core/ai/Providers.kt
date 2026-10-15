@@ -210,6 +210,8 @@ data class AppSettings(
     val reminderHour: Int = 9,
     /** A recap of the week's meetings, written and shown as a notification on Friday afternoons. */
     val weeklyRecap: Boolean = false,
+    /** First-run setup was finished or closed, so it isn't opened by itself again. */
+    val setupDone: Boolean = false,
 ) {
     fun settingsFor(id: ProviderId): ProviderSettings = providers[id] ?: ProviderSettings()
 

@@ -103,6 +103,10 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
             localModelMissing
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** Setup still needed and never finished or closed: it opens by itself once. */
+    val firstRun: StateFlow<Boolean> = combine(needsSetup, container.settingsStore.value) { needed, s -> needed && !s.setupDone }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     suspend fun startRecording(title: String?): Result<String> = runCatching { container.recorder.start(title) }
 
     suspend fun createNote(): String = container.notes.create().id

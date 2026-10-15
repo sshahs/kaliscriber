@@ -20,6 +20,7 @@ import com.kaliscriber.app.ui.people.PersonScreen
 import com.kaliscriber.app.ui.recap.RecapScreen
 import com.kaliscriber.app.ui.recording.RecordingScreen
 import com.kaliscriber.app.ui.settings.SettingsPage
+import com.kaliscriber.app.ui.setup.SetupScreen
 import com.kaliscriber.app.ui.settings.SettingsScreen
 
 object Routes {
@@ -32,6 +33,7 @@ object Routes {
     const val ASK_ALL = "ask-all?q={q}"
     const val PERSON = "person/{name}"
     const val RECAP = "recap"
+    const val SETUP = "setup"
     fun person(name: String) = "person/${Uri.encode(name)}"
     fun meeting(id: String, tab: Int = 0, segmentId: String? = null) =
         "meeting/$id?tab=$tab" + (segmentId?.let { "&seg=${Uri.encode(it)}" } ?: "")
@@ -71,8 +73,12 @@ fun AppNavigation(openTasks: Boolean = false) {
                 onAskAll = { nav.navigate(Routes.askAll(it)) },
                 onOpenPerson = { nav.navigate(Routes.person(it)) },
                 onOpenRecap = { nav.navigate(Routes.RECAP) },
+                onOpenSetup = { nav.navigate(Routes.SETUP) { launchSingleTop = true } },
                 startTab = if (openTasks) 2 else 0,
             )
+        }
+        composable(Routes.SETUP) {
+            SetupScreen(onDone = { nav.popBackStack(Routes.HOME, inclusive = false) })
         }
         composable(Routes.RECAP) {
             RecapScreen(onBack = { nav.popBackStack() }, onOpenMeeting = { nav.navigate(Routes.meeting(it)) })

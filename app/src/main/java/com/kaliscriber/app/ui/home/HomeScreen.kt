@@ -158,6 +158,8 @@ fun HomeScreen(
     val dueTasks by vm.dueTasks.collectAsStateWithLifecycle()
     val recording by vm.recording.collectAsStateWithLifecycle()
     val needsSetup by vm.needsSetup.collectAsStateWithLifecycle()
+    val firstRun by vm.firstRun.collectAsStateWithLifecycle()
+    LaunchedEffect(firstRun) { if (firstRun) onOpenSetup() }
     val prep by vm.prep.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(startTab.coerceIn(0, 3)) }
     val snackbar = remember { SnackbarHostState() }
