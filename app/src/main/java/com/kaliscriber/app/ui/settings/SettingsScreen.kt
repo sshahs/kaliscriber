@@ -441,7 +441,8 @@ private fun GlossarySection(settings: AppSettings, vm: SettingsViewModel) {
     SectionCard("Glossary") {
         Text(
             "Names, products and jargon that speech recognition gets wrong, one per line (for example \"Priya Sharma — product lead\"). " +
-                "The AI spells them correctly in summaries and answers, and fixes them in the transcript after each meeting.",
+                "The AI spells them correctly in summaries and answers, and fixes them in the transcript after each meeting. " +
+                "With an on-device Parakeet model, the recognizer also listens out for them as you record.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

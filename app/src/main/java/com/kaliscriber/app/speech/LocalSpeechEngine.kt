@@ -29,6 +29,7 @@ import com.kaliscriber.core.ai.stt.SttResult
 import com.kaliscriber.core.ai.stt.VoiceEmbedder
 import com.kaliscriber.core.model.WordTiming
 import com.kaliscriber.core.speakers.BlockMerge
+import com.kaliscriber.core.transcript.Glossary
 import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -74,12 +75,13 @@ class LocalSpeechEngine(
             lock.withLock {
                 val model = selectedModel()
                     ?: throw AiException("Download an on-device speech model in Settings → On-device speech first.")
-                val asr = ensureRecognizer(model, language)
+                val hotwords = hotwords(model)
+                val asr = ensureRecognizer(model, language, hotwords.isNotEmpty())
                 val segments = mutableListOf<RawSegment>()
 
                 fun recognize(startSample: Long, samples: FloatArray) {
                     if (samples.size < AudioDecoder.SAMPLE_RATE / 4) return
-                    val stream = asr.createStream()
+                    val stream = if (hotwords.isEmpty()) asr.createStream() else asr.createStream(hotwords)
                     try {
                         stream.acceptWaveform(samples, AudioDecoder.SAMPLE_RATE)
                         asr.decode(stream)
@@ -213,9 +215,31 @@ class LocalSpeechEngine(
             it == Character.UnicodeScript.KATAKANA || it == Character.UnicodeScript.HANGUL
     }
 
-    private fun ensureRecognizer(model: LocalModel, language: String?): OfflineRecognizer {
+    /**
+     * Glossary terms for Parakeet to listen out for, as sherpa-onnx takes them per stream ("a/b/c").
+     * Whisper and SenseVoice can't take hotwords in sherpa-onnx; their transcripts still get the
+     * glossary fixes after the meeting.
+     */
+    private fun hotwords(model: LocalModel): String =
+        if (model.family == AsrFamily.PARAKEET) Glossary.hotwords(settings().glossary).joinToString("/") else ""
+
+    /** The SentencePiece vocabulary sherpa-onnx needs to turn hotwords into Parakeet's tokens. */
+    private fun bpeVocab(model: LocalModel): File {
+        val tokens = models.file(model, "tokens.txt")
+        val vocab = File(models.dir(model), "bpe.vocab")
+        if (!vocab.isFile || vocab.lastModified() < tokens.lastModified()) {
+            val tmp = File(vocab.path + ".tmp")
+            tmp.writeText(Glossary.bpeVocab(tokens.readText()))
+            if (!tmp.renameTo(vocab)) throw AiException("Could not prepare the glossary for ${model.name}")
+        }
+        return vocab
+    }
+
+    private fun ensureRecognizer(model: LocalModel, language: String?, withHotwords: Boolean): OfflineRecognizer {
         val lang = language?.trim()?.lowercase().orEmpty()
-        val key = "${model.id}|$lang"
+        // Hotwords need beam search, which recognizes as fast as greedy search on Parakeet.
+        val beam = withHotwords && model.family == AsrFamily.PARAKEET
+        val key = "${model.id}|$lang|$beam"
         recognizer?.let { if (recognizerKey == key) return it }
         recognizer?.release()
         recognizer = null
@@ -241,6 +265,9 @@ class LocalSpeechEngine(
                 tokens = models.file(model, "tokens.txt").absolutePath,
                 modelType = "nemo_transducer",
                 numThreads = threads,
+                // Only with a vocabulary: sherpa-onnx stops the app if hotwords meet "bpe" without one.
+                modelingUnit = if (beam) "bpe" else "",
+                bpeVocab = if (beam) bpeVocab(model).absolutePath else "",
             )
             AsrFamily.SENSE_VOICE -> OfflineModelConfig(
                 senseVoice = OfflineSenseVoiceModelConfig(
@@ -254,7 +281,17 @@ class LocalSpeechEngine(
             null -> throw AiException("${model.name} is not a speech recognition model")
         }
         val created = try {
-            OfflineRecognizer(null, OfflineRecognizerConfig(modelConfig = modelConfig))
+            val config = if (beam) {
+                OfflineRecognizerConfig(
+                    modelConfig = modelConfig,
+                    decodingMethod = "modified_beam_search",
+                    maxActivePaths = 4,
+                    hotwordsScore = HOTWORD_SCORE,
+                )
+            } else {
+                OfflineRecognizerConfig(modelConfig = modelConfig)
+            }
+            OfflineRecognizer(null, config)
         } catch (e: Exception) {
             throw AiException("Could not load ${model.name}: ${e.message}. Try deleting and downloading it again.", cause = e)
         }
@@ -505,5 +542,10 @@ class LocalSpeechEngine(
         /** Longest stretch diarized in one go (about 38 MB of audio in memory). */
         const val BLOCK_SECONDS = 10 * 60
         const val VOICEPRINT_SECONDS = 30
+        /**
+         * Boost per hotword token. Tested on Parakeet v3: up to 4 never turned correctly heard
+         * speech into a glossary term, 6 did.
+         */
+        const val HOTWORD_SCORE = 2f
     }
 }
