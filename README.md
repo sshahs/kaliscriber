@@ -9,7 +9,8 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - **Bottom navigation** for Meetings, Notes, Tasks and People. Meetings are grouped by day and can be filtered by person, summary format or needing attention.
 - **Undo instead of confirmations**: swipe left to delete a meeting or note; deleting a recording or merging speakers can be undone for a few seconds too.
 - **Errors point to the fix** (the right Settings page, or Try again), and a notification says when a meeting's notes are ready.
-- **Settings** opens on seven pages with a search box.
+- **Settings** opens on short pages with a search box.
+- **Light or dark** (or follow the phone), with or without wallpaper colours (Settings → Appearance). Screen readers get labelled controls and headings.
 
 **Meetings**
 - Record meetings in a foreground service (keeps going with the screen off) with a **live transcript** that updates every few seconds.
@@ -17,10 +18,14 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - When recording stops, the whole meeting is re-transcribed with a speaker-aware model (if your provider has one) for consistent speakers. If it doesn't, the AI model separates speakers from the text.
 - **Insights:** summary, action items (with owner, due date and priority, which you can tick off), key points, decisions, highlights (tap to play that moment), topics, risks, next steps and tone.
 - **Summary formats** for 1:1s, stand-ups, sales calls, interviews and lectures add sections that matter for that kind of meeting (e.g. done, next and blockers per person at a stand-up). The format is guessed from the meeting or calendar title and can be changed on the summary.
+- **Your own summary formats** (Settings → Summary formats): name a format, say what kind of meeting it is for and list its sections, optionally starting from a built-in one. Give it title words ("tickets, support review") and matching meetings use it by themselves.
+- **Since last time:** a meeting with the same title (dates aside) or calendar event as an earlier one shows what that meeting decided and which of its action items are still open or done, with a link back to it.
+- **Talk time:** each person's share of the talking, turns, questions and longest stretch.
+- **Share a clip:** the share button on a highlight or bookmark, or *Share clip* on selected transcript lines, sends that stretch of audio (a small M4A) with what was said in it.
 - **Ask AI** about the meeting, or about a part of it: long-press lines in the transcript, then tap *Ask AI*. Answers cite timestamps and appear as the AI writes them; *Stop* ends an answer early and keeps what arrived.
 - **Find in transcript:** highlight matches, step through them, or show one speaker's lines.
 - **Search all meetings:** the search box on the home screen (which also asks the AI when you type a question) looks through titles, people, summaries, action items and every transcript line, with word forms matched ("price" finds "pricing"). Tap a result to open the transcript at that line.
-- **Ask all meetings:** ask a question about everything you've recorded ("What did we decide about pricing last month?"). The app finds the relevant meetings and passages, the AI answers from them, and each answer lists its sources. Tap a source to jump to that moment. With **smart search** (Settings, an optional 30 MB on-device model) it also finds passages by meaning, so a question about cost finds talk about prices.
+- **Ask all meetings:** ask a question about everything you've recorded ("What did we decide about pricing last month?"). The app finds the relevant meetings and passages, the AI answers from them, and each answer lists its sources. Tap a source to jump to that moment. With **smart search** (Settings, an optional 30 MB on-device model) it also finds passages by meaning, so a question about cost finds talk about prices. Filters narrow questions to the last week, month, three months or year, to one person and to one summary format.
 - **Weekly recap** (the calendar button on the home screen): the AI's account of a week of meetings, written from their notes (what happened, decisions, themes, risks and what to follow up), with the week's open action items by person and what's due next week. Share it as Markdown, have it read aloud, or get it as a notification on Friday afternoons (Settings → Reminders).
 - **Tasks:** every action item from every meeting in one list, grouped into overdue, due today, next 7 days, later and no date. Filter by person, tick items off, or edit the task, owner and due date. Edits and ticks are kept when a summary is regenerated. An optional daily reminder (Settings → Action item reminders) lists what's overdue or due that day.
 - **People:** a page per person from your meetings (named speakers, action item owners and saved voices), with their open tasks, notable quotes, the meetings they were in and how long they spoke, plus one tap to ask the AI about them. First names are matched to full names ("Priya" → "Priya Sharma").
@@ -45,6 +50,7 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - **Speakers named as you go:** every ten minutes the live transcript is labelled with who is speaking, and saved voices are named straight away. Names you give during the meeting are kept.
 - **Bookmarks:** tap *Mark* (or *Bookmark* in the notification, or press play/pause on your headphones) when something important is said, optionally with a note. Marked moments get extra weight in the notes and summary.
 - **Calendar:** a recording started during an event in your CalDAV calendar takes its title and number of invitees, and the invitees' names help the AI name speakers.
+- **Interruptions:** when a phone call or another app takes the microphone, the recording screen and notification say so, and the gap is marked in the transcript and noted for the AI, so nothing missing is guessed at.
 - **Cleaner audio:** noise suppression and automatic volume (on by default), and a choice of microphone: the phone, a wired or USB headset, or a Bluetooth headset.
 
 **Export** (the share icon on a meeting)
@@ -53,6 +59,7 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - **Notion:** creates a page under a parent page you choose, with headings, bullets and to-dos.
 - **AFFiNE:** creates a doc through the workspace MCP endpoint. If your server doesn't allow writing yet, the notes are copied and AFFiNE is opened so you can paste them.
 - **Baikal / CalDAV:** adds the meeting as a calendar event and each action item as a task (with due date and priority). Exporting again updates the same items.
+- **Markdown folder** (Settings → Export destinations): pick a folder, such as an Obsidian vault, and every finished meeting gets a Markdown note there with properties (date, people, format, open actions, tags), the notes and optionally the transcript. Notes follow the meeting: rewritten when it changes, renamed with it, removed when it's deleted.
 
 **Notes**
 - Type or dictate notes, then have AI tidy them up, summarise them, extract action items, find gaps and questions, suggest a title, or follow your own instruction.
