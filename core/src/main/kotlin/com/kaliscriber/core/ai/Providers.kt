@@ -223,6 +223,11 @@ data class AppSettings(
     /** Summary formats the user made, offered alongside the built-in ones. */
     val customFormats: List<CustomFormat> = emptyList(),
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** Record calendar meetings by themselves, from their start to their end. */
+    val autoRecord: Boolean = false,
+    val autoRecordWhich: com.kaliscriber.core.calendar.AutoRecord.Which = com.kaliscriber.core.calendar.AutoRecord.Which.ALL,
+    /** Also read the calendars on this phone (Google, Exchange and others), not just the CalDAV one. */
+    val phoneCalendar: Boolean = false,
     /** Colours taken from the wallpaper (Android 12 and later) instead of the app's own. */
     val dynamicColor: Boolean = true,
 ) {

@@ -68,7 +68,8 @@ class RecordingManager(
     private var audioFile: File? = null
     private var chunks: Channel<AudioChunk>? = null
     private var consumer: Job? = null
-    private val queued = AtomicInteger(0)
+    /** Parts of the current recording waiting to be transcribed; each recording has its own. */
+    private var queued = AtomicInteger(0)
 
     fun isActive(meetingId: String): Boolean = when (val s = _state.value) {
         is RecordingState.Recording -> s.meetingId == meetingId
@@ -76,9 +77,19 @@ class RecordingManager(
         RecordingState.Idle -> pendingMeetingId == meetingId
     }
 
-    /** Creates the meeting and starts the foreground service, which then calls [beginCapture]. */
+    /** True while [meetingId] is being recorded or its recording is about to begin. */
+    fun isCapturing(meetingId: String): Boolean =
+        pendingMeetingId == meetingId || (_state.value as? RecordingState.Recording)?.meetingId == meetingId
+
+    /** Meetings whose recording stopped and that are still being processed, oldest first. */
+    private val finishing = mutableListOf<String>()
+
+    /**
+     * Creates the meeting and starts the foreground service, which then calls [beginCapture]. A new
+     * meeting can start while the previous one is still being processed (back-to-back meetings).
+     */
     suspend fun start(title: String?): String = lock.withLock {
-        check(_state.value == RecordingState.Idle) { "A meeting is already being recorded" }
+        check(_state.value !is RecordingState.Recording && pendingMeetingId == null) { "A meeting is already being recorded" }
         val meeting = meetings.create(title)
         pendingMeetingId = meeting.id
         onStart(meeting.id)
@@ -96,7 +107,7 @@ class RecordingManager(
         val dir = meetings.audioDir(meetingId)
         val file = File(dir, "recording.m4a")
         val channel = Channel<AudioChunk>(Channel.UNLIMITED)
-        queued.set(0)
+        val queued = AtomicInteger(0).also { this.queued = it }
 
         val captureEngine = AudioCaptureEngine(
             context = context,
@@ -109,15 +120,15 @@ class RecordingManager(
                 override fun onChunk(chunk: AudioChunk) {
                     queued.incrementAndGet()
                     channel.trySend(chunk)
-                    updateRecording { it.copy(queuedChunks = queued.get()) }
+                    updateRecording(meetingId) { it.copy(queuedChunks = queued.get()) }
                 }
 
                 override fun onProgress(capturedMs: Long, level: Float) {
-                    updateRecording { it.copy(elapsedMs = capturedMs, level = level) }
+                    updateRecording(meetingId) { it.copy(elapsedMs = capturedMs, level = level) }
                 }
 
                 override fun onInterruption(reason: String?) {
-                    updateRecording { it.copy(interruption = reason) }
+                    updateRecording(meetingId) { it.copy(interruption = reason) }
                 }
 
                 override fun onGap(gap: Interruption) {
@@ -149,7 +160,7 @@ class RecordingManager(
             for (chunk in channel) {
                 pipeline.transcribeChunk(meetingId, chunk)
                 queued.decrementAndGet()
-                updateRecording { it.copy(queuedChunks = queued.get()) }
+                updateRecording(meetingId) { it.copy(queuedChunks = queued.get()) }
             }
         }
         _state.value = RecordingState.Recording(meetingId, micNote = captureEngine.micNote)
@@ -172,36 +183,54 @@ class RecordingManager(
         return meetings.addBookmark(current.meetingId, current.elapsedMs, note)
     }
 
-    private class Stopped(val meetingId: String, val durationMs: Long, val file: File?)
+    private class Stopped(
+        val meetingId: String,
+        val durationMs: Long,
+        val file: File?,
+        val chunks: Channel<AudioChunk>?,
+        val consumer: Job?,
+        val queued: AtomicInteger,
+    )
 
     private suspend fun stopAndProcess() {
         val stopped = lock.withLock {
             val current = _state.value as? RecordingState.Recording ?: return@withLock null
             _state.value = RecordingState.Finishing(current.meetingId)
+            synchronized(finishing) { finishing += current.meetingId }
             val captureEngine = engine
             engine = null
             val durationMs = withContext(Dispatchers.IO) { captureEngine?.stop() ?: current.elapsedMs }
             val file = audioFile?.takeIf { it.exists() && it.length() > 0 }
             audioFile = null
-            Stopped(current.meetingId, durationMs, file)
+            // Handed over to the processing below, so a new recording can start with its own.
+            Stopped(current.meetingId, durationMs, file, chunks, consumer, queued).also {
+                chunks = null
+                consumer = null
+            }
         } ?: return
         try {
             // Let live transcription of the queued chunks finish before the final pass.
             // Recording has stopped, so stop showing the meeting as recording.
             meetings.update(stopped.meetingId) { it.copy(status = MeetingStatus.TRANSCRIBING) }
-            if (queued.get() > 0) pipeline.noteStep(stopped.meetingId, "Transcribing the last ${queued.get()} part(s) of the meeting")
-            chunks?.close()
-            consumer?.join()
-            chunks = null
-            consumer = null
+            val left = stopped.queued.get()
+            if (left > 0) pipeline.noteStep(stopped.meetingId, "Transcribing the last $left part(s) of the meeting")
+            stopped.chunks?.close()
+            stopped.consumer?.join()
             pipeline.finishRecording(stopped.meetingId, stopped.file, stopped.durationMs)
         } finally {
-            _state.value = RecordingState.Idle
+            // Another meeting may be recording (or still finishing) by now; only this one's state ends here.
+            synchronized(finishing) {
+                finishing.remove(stopped.meetingId)
+                if (_state.value == RecordingState.Finishing(stopped.meetingId)) {
+                    _state.value = finishing.lastOrNull()?.let { RecordingState.Finishing(it) } ?: RecordingState.Idle
+                }
+            }
         }
     }
 
-    private inline fun updateRecording(transform: (RecordingState.Recording) -> RecordingState.Recording) {
-        _state.update { s -> if (s is RecordingState.Recording) transform(s) else s }
+    /** Changes the recording state, only for [meetingId] when given (a finished meeting's late updates don't count). */
+    private inline fun updateRecording(meetingId: String? = null, transform: (RecordingState.Recording) -> RecordingState.Recording) {
+        _state.update { s -> if (s is RecordingState.Recording && (meetingId == null || s.meetingId == meetingId)) transform(s) else s }
     }
 
     companion object {

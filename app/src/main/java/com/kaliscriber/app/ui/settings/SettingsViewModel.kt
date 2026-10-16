@@ -4,6 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.content.Intent
 import android.net.Uri
+import com.kaliscriber.core.calendar.CalendarEvent
+import com.kaliscriber.core.calendar.AutoRecord
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.Manifest
 import com.kaliscriber.app.AppContainer
 import com.kaliscriber.app.backup.BackupManager
 import com.kaliscriber.app.storage.StorageManager
@@ -226,6 +231,45 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun update(transform: (AppSettings) -> AppSettings) {
         viewModelScope.launch { container.settingsStore.update(transform) }
+    }
+
+    // --- Recording calendar meetings ---------------------------------------------------------------
+
+    val autoRecordState = container.autoRecorder.state
+
+    /** What Android allows auto-record to do right now. */
+    data class AutoRecordPermissions(
+        val calendar: Boolean,
+        val anyCalendar: Boolean,
+        val mic: Boolean,
+        val overlay: Boolean,
+        val fullScreen: Boolean,
+        val exactAlarms: Boolean,
+    )
+
+    fun autoRecordPermissions(): AutoRecordPermissions {
+        val auto = container.autoRecorder
+        val calendarAllowed = ContextCompat.checkSelfPermission(container.appContext, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+        val e = settings.value.export
+        val caldav = e.calendarLookup && e.caldavUrl.isNotBlank()
+        return AutoRecordPermissions(
+            calendar = calendarAllowed,
+            anyCalendar = caldav || (settings.value.phoneCalendar && calendarAllowed),
+            mic = auto.micAllowed(),
+            overlay = auto.overlayAllowed(),
+            fullScreen = auto.fullScreenAllowed(),
+            exactAlarms = auto.exactAlarmsAllowed(),
+        )
+    }
+
+    fun upcomingAutoRecord(state: AutoRecord.State): CalendarEvent? = container.autoRecorder.upcoming(state)
+
+    fun skipAutoRecord(event: CalendarEvent) {
+        container.scope.launch { container.autoRecorder.skip(AutoRecord.key(event), event.end) }
+    }
+
+    fun unskipAutoRecord(event: CalendarEvent) {
+        container.scope.launch { container.autoRecorder.unskip(AutoRecord.key(event)) }
     }
 
     // --- Markdown folder -------------------------------------------------------------------------

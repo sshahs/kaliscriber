@@ -118,7 +118,7 @@ enum class SettingsPage(val title: String, val summary: String, val keywords: Li
     ),
     RECORDING(
         "Recording & notes", "Microphone, audio clean-up, glossary and what happens after a meeting",
-        listOf("microphone", "Bluetooth", "headset", "noise", "audio clean-up", "glossary", "names", "terms", "summary", "language", "headphone button", "bookmark", "speaker names", "running notes", "calendar"),
+        listOf("microphone", "Bluetooth", "headset", "noise", "audio clean-up", "glossary", "names", "terms", "summary", "language", "headphone button", "bookmark", "speaker names", "running notes", "calendar", "auto-record", "record automatically", "scheduled meetings", "Google Calendar"),
     ),
     FORMATS(
         "Summary formats", "Your own formats with the sections you want",
@@ -252,6 +252,7 @@ fun SettingsScreen(onBack: () -> Unit, initialPage: SettingsPage? = null) {
                     item { VoiceMemorySection(settings, modelStates, vm) }
                 }
                 SettingsPage.RECORDING -> {
+                    item { AutoRecordSection(settings, vm) }
                     item { ProcessingSettings(settings, vm) }
                     item { GlossarySection(settings, vm) }
                 }

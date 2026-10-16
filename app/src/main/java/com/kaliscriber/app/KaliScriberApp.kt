@@ -67,6 +67,8 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import com.kaliscriber.app.sync.MarkdownFolderSync
+import com.kaliscriber.app.autorecord.AutoRecorder
+import com.kaliscriber.core.calendar.AutoRecord
 import com.kaliscriber.core.sync.MarkdownSync
 import java.io.File
 
@@ -82,6 +84,7 @@ class KaliScriberApp : Application() {
         ReadyNotifier.createChannel(this)
         TaskReminders.createChannel(this)
         RecapReminder.createChannel(this)
+        AutoRecorder.createChannel(this)
     }
 
     private fun createNotificationChannel() {
@@ -194,13 +197,23 @@ class AppContainer(context: Context) {
         JsonValueStore(File(filesDir, "recaps.json"), ListSerializer(WeeklyRecap.serializer()), emptyList()),
     )
     /** Events from the CalDAV calendar, for meeting titles, invitees and prep. */
-    val calendar = CalendarService(http, settings, secrets)
+    val calendar = CalendarService(http, settings, secrets, com.kaliscriber.app.calendar.PhoneCalendar(appContext))
     val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope, onStart = { meetingId ->
         // Start fetching speaker detection now so it is ready when the meeting ends.
         if (speakerPackMissing) models.downloadDiarization()
-        // A meeting on the calendar right now gives the recording its title and invitees.
-        if (calendar.enabled) scope.launch { calendar.eventNow()?.let { pipeline.attachCalendarEvent(meetingId, it) } }
+        // A meeting on the calendar right now gives the recording its title and invitees; one being
+        // recorded by itself is known exactly.
+        val planned = autoRecorder.starting
+        if (planned != null || calendar.enabled) {
+            scope.launch { (planned ?: calendar.eventNow())?.let { pipeline.attachCalendarEvent(meetingId, it) } }
+        }
     })
+
+    /** Records calendar meetings by themselves, from their start to their end. */
+    val autoRecorder = AutoRecorder(
+        appContext, calendar, recorder, pipeline, settings, visibility,
+        JsonValueStore(File(filesDir, "auto-record.json"), AutoRecord.State.serializer(), AutoRecord.State()),
+    )
 
     /** What the app stores, and deleting old recordings as the user chose. */
     val storage = StorageManager(appContext, meetings, settings, jobs)
@@ -278,6 +291,7 @@ class AppContainer(context: Context) {
             recoverInterruptedMeetings()
             // Only once meetings are loaded, so an empty list never looks like everything was deleted.
             markdownSync.start(scope, settingsStore.value)
+            startAutoRecord()
             // Recordings older than the user keeps them are deleted, keeping transcripts.
             runCatching { storage.applyRetention() }.onFailure { Log.w("KaliScriber", "Couldn't delete old recordings", it) }
             // Voices saved with the previous speaker model are learned again once the new one is here.
@@ -287,6 +301,27 @@ class AppContainer(context: Context) {
                     .onSuccess { Log.i("KaliScriber", "Voice memory: learned $it voice(s) again with the new speaker model") }
                     .onFailure { Log.w("KaliScriber", "Voice memory: couldn't learn voices again", it) }
             }
+        }
+    }
+
+    /** Keeps auto-record's alarms in step with its settings, the calendar and the recorder. */
+    private fun startAutoRecord() {
+        scope.launch {
+            settingsStore.value
+                .map { Triple(it.autoRecord, it.autoRecordWhich, it.phoneCalendar) }
+                .distinctUntilChanged()
+                .collect {
+                    autoRecorder.applySettings()
+                    runCatching { autoRecorder.tick(refresh = true) }.onFailure { Log.w("KaliScriber", "Auto-record check failed", it) }
+                }
+        }
+        // A recording stopped by hand, or one that ended, may change what's next.
+        scope.launch {
+            recorder.state
+                .map { (it as? RecordingState.Recording)?.meetingId }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { runCatching { autoRecorder.tick() } }
         }
     }
 

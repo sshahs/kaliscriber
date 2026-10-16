@@ -100,6 +100,9 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
+import java.util.Date
+import java.text.DateFormat
 
 class RecordingViewModel(private val container: AppContainer) : ViewModel() {
     val state: StateFlow<RecordingState> = container.recorder.state
@@ -114,6 +117,15 @@ class RecordingViewModel(private val container: AppContainer) : ViewModel() {
             if (id.isNullOrEmpty()) flowOf(null) else container.meetings.observe(id)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** The recording auto-record started from the calendar, if this is one. */
+    val autoActive = container.autoRecorder.state
+        .map { it.active }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun keepRecording() {
+        container.scope.launch { container.autoRecorder.keepRecording() }
+    }
 
     fun pause(paused: Boolean) = container.recorder.setPaused(paused)
     suspend fun bookmark(): Bookmark? = container.recorder.bookmark()
@@ -133,6 +145,7 @@ fun RecordingScreen(onBack: () -> Unit, onAskAi: (String) -> Unit, onFinished: (
     val vm = appViewModel { RecordingViewModel(it) }
     val state by vm.state.collectAsStateWithLifecycle()
     val meeting by vm.meeting.collectAsStateWithLifecycle()
+    val auto by vm.autoActive.collectAsStateWithLifecycle()
     var lastMeetingId by remember { mutableStateOf<String?>(null) }
     var sawActive by remember { mutableStateOf(false) }
     var noting by remember { mutableStateOf<Bookmark?>(null) }
@@ -173,6 +186,20 @@ fun RecordingScreen(onBack: () -> Unit, onAskAi: (String) -> Unit, onFinished: (
                         onStop = vm::stop,
                         onMark = { scope.launch { noting = vm.bookmark() } },
                     )
+                    auto?.takeIf { it.meetingId == s.meetingId && it.stopAtEnd }?.let { a ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "From your calendar · stops by itself at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(a.end))}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = vm::keepRecording) { Text("Keep recording") }
+                        }
+                    }
                     ExpectedSpeakersRow(meeting?.expectedSpeakers, onSelect = vm::setExpectedSpeakers)
                     TextButton(
                         onClick = { onAskAi(s.meetingId) },
