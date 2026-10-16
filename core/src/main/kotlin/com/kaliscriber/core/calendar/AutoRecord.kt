@@ -57,6 +57,8 @@ object AutoRecord {
     }
 
     fun wanted(event: CalendarEvent, which: Which, state: State): Boolean {
+        // Recordings the user scheduled in the app are always wanted, whatever their length.
+        if (ScheduledRecordings.isScheduled(event)) return event.end > event.start && key(event) !in state.skipped
         if (event.allDay) return false
         val length = event.end - event.start
         if (length < MIN_MS || length > MAX_MS) return false

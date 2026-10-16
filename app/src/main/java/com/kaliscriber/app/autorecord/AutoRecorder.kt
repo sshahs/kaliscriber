@@ -25,6 +25,7 @@ import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.calendar.AutoRecord
 import com.kaliscriber.core.calendar.CalendarEvent
+import com.kaliscriber.core.calendar.ScheduledRecordings
 import com.kaliscriber.core.pipeline.MeetingPipeline
 import com.kaliscriber.core.store.JsonValueStore
 import kotlinx.coroutines.CancellationException
@@ -70,11 +71,11 @@ class AutoRecorder(
 
     private suspend fun tickLocked(refresh: Boolean): Long? {
         val s = settings()
-        if (!s.autoRecord) return null
+        if (!s.autoRecord && s.scheduledRecordings.isEmpty()) return null
         val now = System.currentTimeMillis()
         var st = store.value.value.pruned(now)
         // A slow or unreachable calendar mustn't hold up starting the meeting: use what was read last.
-        val read = withTimeoutOrNull(READ_TIMEOUT_MS) {
+        val read = if (!s.autoRecord) null else withTimeoutOrNull(READ_TIMEOUT_MS) {
             try {
                 calendar.events(force = refresh)
             } catch (e: CancellationException) {
@@ -84,7 +85,7 @@ class AutoRecorder(
             }
         }
         st = when {
-            !calendar.enabled -> st.copy(events = emptyList())
+            !s.autoRecord || !calendar.enabled -> st.copy(events = emptyList())
             read != null && calendar.lastReadOk -> st.copy(events = read)
             // Unreachable just now: keep what was read before (phone calendar events are added in fresh).
             read != null -> st.copy(events = (st.events + read).distinctBy { AutoRecord.key(it) })
@@ -93,7 +94,8 @@ class AutoRecorder(
         // Stopped by hand (or it failed): it's no longer ours to stop.
         st.active?.let { if (!recorder.isCapturing(it.meetingId)) st = st.copy(active = null) }
 
-        var decision = AutoRecord.decide(st.events, now, s.autoRecordWhich, st, recorderState(st))
+        val events = allEvents(st, now)
+        var decision = AutoRecord.decide(events, now, s.autoRecordWhich, st, recorderState(st))
         if (decision == AutoRecord.Decision.Stop) {
             val active = st.active!!
             recorder.stop()
@@ -104,7 +106,7 @@ class AutoRecorder(
             notifyStopped(active)
             st = st.copy(active = null)
             // The next meeting may be starting right now (back-to-back meetings).
-            decision = AutoRecord.decide(st.events, now, s.autoRecordWhich, st, AutoRecord.Recorder.IDLE)
+            decision = AutoRecord.decide(events, now, s.autoRecordWhich, st, AutoRecord.Recorder.IDLE)
         }
         if (decision is AutoRecord.Decision.Start) {
             val event = decision.event
@@ -113,7 +115,16 @@ class AutoRecorder(
             st = begin(event) ?: st
         }
         store.update { st }
-        return AutoRecord.nextWake(st.events, now, s.autoRecordWhich, st, recorderState(st))
+        return AutoRecord.nextWake(events, now, s.autoRecordWhich, st, recorderState(st))
+    }
+
+    /**
+     * Calendar events (when auto-record is on) and the recordings scheduled in the app. Only the
+     * calendar's are kept in the state; scheduled ones are worked out from the settings each time.
+     */
+    private fun allEvents(st: AutoRecord.State, now: Long): List<CalendarEvent> {
+        val scheduled = ScheduledRecordings.occurrences(settings().scheduledRecordings, now - 12 * HOUR_MS, now + 8 * 24 * HOUR_MS)
+        return st.events + scheduled
     }
 
     private fun recorderState(st: AutoRecord.State): AutoRecord.Recorder {
@@ -143,13 +154,14 @@ class AutoRecorder(
     suspend fun startFromScreen(key: String) {
         val wake = mutex.withLock {
             val st = store.value.value
-            val event = st.events.firstOrNull { AutoRecord.key(it) == key }
+            val event = allEvents(st, System.currentTimeMillis()).firstOrNull { AutoRecord.key(it) == key }
             if (event != null && st.active == null && recorder.state.value !is RecordingState.Recording &&
                 System.currentTimeMillis() < event.end - AutoRecord.MIN_LEFT_MS
             ) {
                 startLocked(event)?.let { store.update { _ -> it } }
             }
-            AutoRecord.nextWake(store.value.value.events, System.currentTimeMillis(), settings().autoRecordWhich, store.value.value, recorderState(store.value.value))
+            val now = System.currentTimeMillis()
+            AutoRecord.nextWake(allEvents(store.value.value, now), now, settings().autoRecordWhich, store.value.value, recorderState(store.value.value))
         }
         schedule(wake)
     }
@@ -191,13 +203,15 @@ class AutoRecorder(
     }
 
     /** The next meeting that will be recorded, for showing ahead of time. */
-    fun upcoming(st: AutoRecord.State = state.value): CalendarEvent? =
-        if (!settings().autoRecord) null else AutoRecord.upcoming(st.events, System.currentTimeMillis(), settings().autoRecordWhich, st)
+    fun upcoming(st: AutoRecord.State = state.value): CalendarEvent? {
+        val now = System.currentTimeMillis()
+        return AutoRecord.upcoming(allEvents(st, now), now, settings().autoRecordWhich, st)
+    }
 
     /** Turns the periodic calendar check on or off to match the settings. */
     fun applySettings() {
         val work = WorkManager.getInstance(context)
-        if (settings().autoRecord) {
+        if (settings().autoRecord || settings().scheduledRecordings.isNotEmpty()) {
             work.enqueueUniquePeriodicWork(
                 WORK, ExistingPeriodicWorkPolicy.KEEP,
                 PeriodicWorkRequestBuilder<AutoRecordWorker>(CHECK_MINUTES, TimeUnit.MINUTES).build(),
@@ -315,6 +329,7 @@ class AutoRecorder(
         private const val CHECK_MINUTES = 30L
         private const val READ_TIMEOUT_MS = 6_000L
         private const val STOP_WAIT_MS = 15_000L
+        private const val HOUR_MS = 3_600_000L
 
         fun createChannel(context: Context) {
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(

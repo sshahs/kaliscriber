@@ -101,6 +101,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
+import com.kaliscriber.core.calendar.ScheduledRecordings
 import java.util.Date
 import java.text.DateFormat
 
@@ -192,7 +193,7 @@ fun RecordingScreen(onBack: () -> Unit, onAskAi: (String) -> Unit, onFinished: (
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "From your calendar · stops by itself at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(a.end))}",
+                                (if (a.key.startsWith(ScheduledRecordings.UID_PREFIX)) "Scheduled" else "From your calendar") + " · stops by itself at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(a.end))}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.weight(1f),

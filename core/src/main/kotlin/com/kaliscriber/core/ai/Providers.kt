@@ -228,6 +228,8 @@ data class AppSettings(
     val autoRecordWhich: com.kaliscriber.core.calendar.AutoRecord.Which = com.kaliscriber.core.calendar.AutoRecord.Which.ALL,
     /** Also read the calendars on this phone (Google, Exchange and others), not just the CalDAV one. */
     val phoneCalendar: Boolean = false,
+    /** Recordings the user scheduled in the app, recorded at their times whether or not auto-record is on. */
+    val scheduledRecordings: List<com.kaliscriber.core.calendar.ScheduledRecording> = emptyList(),
     /** Colours taken from the wallpaper (Android 12 and later) instead of the app's own. */
     val dynamicColor: Boolean = true,
 ) {

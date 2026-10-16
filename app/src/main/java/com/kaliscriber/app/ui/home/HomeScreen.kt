@@ -54,6 +54,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Event
@@ -143,6 +144,8 @@ fun HomeScreen(
     onAskAll: (question: String?) -> Unit = {},
     onOpenPerson: (String) -> Unit = {},
     onOpenRecap: () -> Unit = {},
+    /** Opens recordings scheduled for set times. */
+    onOpenSchedule: () -> Unit = {},
     /** Opens first-run setup. */
     onOpenSetup: () -> Unit = onOpenSettings,
     startTab: Int = 0,
@@ -316,6 +319,7 @@ fun HomeScreen(
                     showFilters = hasMeetings,
                     onAskAll = { onAskAll(null) },
                     onOpenRecap = onOpenRecap,
+                    onOpenSchedule = onOpenSchedule,
                     onFilter = { vm.filter.value = it },
                 )
             }
@@ -434,6 +438,7 @@ private fun MeetingChips(
     showFilters: Boolean,
     onAskAll: () -> Unit,
     onOpenRecap: () -> Unit,
+    onOpenSchedule: () -> Unit,
     onFilter: (MeetingList.Filter) -> Unit,
 ) {
     var personMenu by remember { mutableStateOf(false) }
@@ -445,6 +450,7 @@ private fun MeetingChips(
     ) {
         AssistChip(onClick = onAskAll, label = { Text("Ask all meetings") }, leadingIcon = { Icon(Icons.Filled.QuestionAnswer, null, Modifier.size(18.dp)) })
         AssistChip(onClick = onOpenRecap, label = { Text("Weekly recap") }, leadingIcon = { Icon(Icons.Filled.DateRange, null, Modifier.size(18.dp)) })
+        AssistChip(onClick = onOpenSchedule, label = { Text("Scheduled") }, leadingIcon = { Icon(Icons.Filled.Schedule, null, Modifier.size(18.dp)) })
         if (!showFilters) return@Row
         FilterChip(
             selected = filter.needsAttention,
