@@ -270,6 +270,10 @@ data class ExportSettings(
     val calendarLookup: Boolean = true,
     /** Upload straight to Google Docs with the user's Google account (needs an OAuth client). */
     val googleDirectUpload: Boolean = false,
+    /** A folder (content URI of a document tree) kept with one Markdown note per meeting; blank for none. */
+    val markdownFolder: String = "",
+    /** Put the transcript in the folder's notes too. */
+    val markdownTranscript: Boolean = true,
 )
 
 /** Fully resolved settings for one provider, including the key. */

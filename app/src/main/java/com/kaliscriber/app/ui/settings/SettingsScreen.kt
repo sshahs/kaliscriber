@@ -123,7 +123,10 @@ enum class SettingsPage(val title: String, val summary: String, val keywords: Li
     ),
     SEARCH("Smart search", "Find passages by meaning when asking across meetings", listOf("semantic", "meaning", "Ask all meetings", "search model")),
     REMINDERS("Reminders", "Daily action items and the weekly recap", listOf("notification", "daily", "tasks", "due", "weekly recap", "Friday")),
-    EXPORT("Export destinations", "Email, Google Docs, Notion, AFFiNE and Baikal/CalDAV", listOf("email", "Google Docs", "Drive", "Notion", "AFFiNE", "Baikal", "CalDAV", "calendar", "tasks")),
+    EXPORT(
+        "Export destinations", "Email, Google Docs, Notion, AFFiNE, Baikal/CalDAV and a Markdown folder",
+        listOf("email", "Google Docs", "Drive", "Notion", "AFFiNE", "Baikal", "CalDAV", "calendar", "tasks", "Markdown", "Obsidian", "folder", "sync", "vault"),
+    ),
     DATA("Data & storage", "Space used, keeping recordings, backup and restore", listOf("storage", "space", "delete recordings", "keep recordings", "backup", "restore", "password")),
     ;
 
@@ -250,7 +253,10 @@ fun SettingsScreen(onBack: () -> Unit, initialPage: SettingsPage? = null) {
                 SettingsPage.FORMATS -> item { FormatsSection(settings, vm) }
                 SettingsPage.SEARCH -> item { SmartSearchSection(modelStates, vm) }
                 SettingsPage.REMINDERS -> item { ReminderSection(settings, vm) }
-                SettingsPage.EXPORT -> item { ExportSection(settings, vm) }
+                SettingsPage.EXPORT -> {
+                    item { ExportSection(settings, vm) }
+                    item { MarkdownFolderSection(settings, vm) }
+                }
                 SettingsPage.DATA -> {
                     item { StorageSection(settings, vm) }
                     item { BackupSection(vm) }
@@ -1114,7 +1120,7 @@ private fun ProcessingSettings(settings: AppSettings, vm: SettingsViewModel) {
 }
 
 @Composable
-private fun ToggleRow(title: String, body: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun ToggleRow(title: String, body: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyMedium)

@@ -64,6 +64,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import com.kaliscriber.app.sync.MarkdownFolderSync
+import com.kaliscriber.core.sync.MarkdownSync
 import java.io.File
 
 class KaliScriberApp : Application() {
@@ -179,6 +183,11 @@ class AppContainer(context: Context) {
     )
     /** Which meetings "Ask all" questions are about, kept while the app runs. */
     val askScope = kotlinx.coroutines.flow.MutableStateFlow(com.kaliscriber.core.ask.AskScope())
+    /** One Markdown note per meeting in a folder the user picked, kept up to date. */
+    val markdownSync = MarkdownFolderSync(
+        appContext, meetings, settings,
+        JsonValueStore(File(filesDir, "markdown-sync.json"), MapSerializer(String.serializer(), MarkdownSync.Entry.serializer()), emptyMap()),
+    )
     /** Recaps across a week of meetings. */
     val recaps = WeeklyRecaps(
         meetings, ai, settings,
@@ -267,6 +276,8 @@ class AppContainer(context: Context) {
             meetings.load()
             notes.load()
             recoverInterruptedMeetings()
+            // Only once meetings are loaded, so an empty list never looks like everything was deleted.
+            markdownSync.start(scope, settingsStore.value)
             // Recordings older than the user keeps them are deleted, keeping transcripts.
             runCatching { storage.applyRetention() }.onFailure { Log.w("KaliScriber", "Couldn't delete old recordings", it) }
             // Voices saved with the previous speaker model are learned again once the new one is here.

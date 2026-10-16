@@ -2,6 +2,7 @@ package com.kaliscriber.app.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.content.Intent
 import android.net.Uri
 import com.kaliscriber.app.AppContainer
 import com.kaliscriber.app.backup.BackupManager
@@ -225,6 +226,41 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun update(transform: (AppSettings) -> AppSettings) {
         viewModelScope.launch { container.settingsStore.update(transform) }
+    }
+
+    // --- Markdown folder -------------------------------------------------------------------------
+
+    val markdownStatus = container.markdownSync.status
+
+    fun markdownFolderName(uri: String): String? = container.markdownSync.folderName(uri)
+
+    /** Starts writing notes into [uri], a folder picked with the system's folder chooser. */
+    fun chooseMarkdownFolder(uri: Uri) {
+        val resolver = container.appContext.contentResolver
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { resolver.takePersistableUriPermission(uri, flags) }
+        val old = settings.value.export.markdownFolder
+        container.scope.launch {
+            if (old.isNotBlank() && old != uri.toString()) runCatching { resolver.releasePersistableUriPermission(Uri.parse(old), flags) }
+            container.markdownSync.reset()
+            container.settingsStore.update { it.copy(export = it.export.copy(markdownFolder = uri.toString())) }
+            container.markdownSync.sync()
+        }
+    }
+
+    /** Stops keeping the folder up to date; the notes already there stay. */
+    fun stopMarkdownSync() {
+        val old = settings.value.export.markdownFolder
+        container.scope.launch {
+            container.settingsStore.update { it.copy(export = it.export.copy(markdownFolder = "")) }
+            container.markdownSync.reset()
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            if (old.isNotBlank()) runCatching { container.appContext.contentResolver.releasePersistableUriPermission(Uri.parse(old), flags) }
+        }
+    }
+
+    fun syncMarkdownNow() {
+        container.scope.launch { container.markdownSync.sync() }
     }
 
     fun save(id: ProviderId, draft: ProviderDraft) {
