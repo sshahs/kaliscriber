@@ -49,14 +49,14 @@ class LibraryAsk(
      * Asks [question]; the answer (or an error message) is added to the conversation and returned.
      * [onText] gets the answer written so far while it arrives.
      */
-    suspend fun ask(question: String, onText: ((String) -> Unit)? = null): AskMessage {
+    suspend fun ask(question: String, scope: AskScope = AskScope(), onText: ((String) -> Unit)? = null): AskMessage {
         val q = question.trim()
         val previous = history.value.value
-        history.update { it + AskMessage(Ids.new(), ChatRole.USER, q, clock.now()) }
+        history.update { it + AskMessage(Ids.new(), ChatRole.USER, q, clock.now(), scope = scope.describe()) }
         var partial = ""
         val track: ((String) -> Unit)? = onText?.let { forward -> { text -> partial = text; forward(text) } }
         val reply = try {
-            answer(q, previous, track)
+            answer(q, scope, previous, track)
         } catch (e: CancellationException) {
             // Stopped while the answer was being written: keep what had arrived.
             if (partial.isNotBlank()) {
@@ -72,15 +72,20 @@ class LibraryAsk(
         return reply
     }
 
-    private suspend fun answer(question: String, previous: List<AskMessage>, onText: ((String) -> Unit)?): AskMessage {
-        val all = meetings.all().filter { it.hasTranscript || it.insights != null }
-        if (all.isEmpty()) throw AiException("There are no transcribed meetings to search yet.")
+    private suspend fun answer(question: String, scope: AskScope, previous: List<AskMessage>, onText: ((String) -> Unit)?): AskMessage {
+        val recorded = meetings.all().filter { it.hasTranscript || it.insights != null }
+        if (recorded.isEmpty()) throw AiException("There are no transcribed meetings to search yet.")
+        val now = clock.now()
+        val all = recorded.filter { scope.matches(it, now, settings().customFormats) }
+        if (all.isEmpty()) throw AiException("No meetings match the filters (${scope.describe()}). Change or clear them and ask again.")
         // Follow-ups ("and who owns it?") lean on the previous question for what to look up.
         val lastQuestion = previous.lastOrNull { it.role == ChatRole.USER && !it.isError }?.content
         val keywords = (expandKeywords(question) + MeetingSearch.terms(question) + MeetingSearch.terms(lastQuestion.orEmpty())).distinct()
         val budget = settings().maxTranscriptChars.coerceAtMost(CONTEXT_BUDGET)
         val sources = MeetingSearch.retrieve(all, corpus(), keywords, budget, question = question)
-        val context = sources.joinToString("\n") { MeetingSearch.render(it, Prompts::formatDate) }
+        val context = sources.joinToString("\n") { MeetingSearch.render(it, Prompts::formatDate) }.let { text ->
+            if (scope.active) "Only meetings matching the user's filters (${scope.describe()}) are included (${all.size} of ${recorded.size}).\n$text" else text
+        }
 
         val turns = previous.filter { !it.isError }.takeLast(10).map {
             LlmMessage(if (it.role == ChatRole.USER) LlmRole.USER else LlmRole.ASSISTANT, it.content)

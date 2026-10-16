@@ -3,7 +3,9 @@ package com.kaliscriber.core
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.ai.Prompts
 import com.kaliscriber.core.ai.stt.SttResult
+import com.kaliscriber.core.ask.AskScope
 import com.kaliscriber.core.ask.LibraryAsk
+import com.kaliscriber.core.util.Clock
 import com.kaliscriber.core.model.ActionItem
 import com.kaliscriber.core.model.AskMessage
 import com.kaliscriber.core.model.Meeting
@@ -101,6 +103,39 @@ class LibraryTest {
 
         ask.clear()
         assertTrue(ask.messages.value.isEmpty())
+    }
+
+    @Test
+    fun `asking with filters only reads the meetings that match`() = runTest {
+        val repo = MeetingRepository.inDir(root)
+        repo.load()
+        listOf(launch, hiring).forEach { m -> repo.create(m.title).also { created -> repo.update(created.id) { m.copy(id = created.id) } } }
+        val week = 7L * 24 * 60 * 60 * 1000
+        val llm = FakeLlm { req ->
+            when (req.system) {
+                Prompts.SEARCH_KEYWORDS_SYSTEM -> """{"keywords":["budget"]}"""
+                else -> {
+                    assertTrue(req.system.contains("Hiring plan") && !req.system.contains("Q3 launch sync"), req.system)
+                    assertTrue(req.system.contains("filters (the last 7 days, with Priya)"), req.system)
+                    "Hiring budget was approved [M1]."
+                }
+            }
+        }
+        val history = JsonValueStore(File(root, "ask2.json"), ListSerializer(AskMessage.serializer()), emptyList())
+        val ask = LibraryAsk(
+            repo, history, FakeAi(llm, FakeStt(false) { SttResult(emptyList(), false) }), { AppSettings() },
+            { MemoryCorpus(repo.all().map { repo.get(it.id)!! }) }, clock = Clock { week + 1_500 },
+        )
+        // Names match whatever their case.
+        val answer = ask.ask("What about money?", AskScope(AskScope.Period.WEEK, person = "Priya"))
+        assertFalse(answer.isError, answer.content)
+        assertEquals("the last 7 days, with Priya", ask.messages.value.first().scope)
+        assertTrue(AskScope(person = "PRIYA").matches(hiring, 0))
+
+        val none = ask.ask("Anything?", AskScope(person = "Sam"))
+        assertTrue(none.isError && none.content.contains("No meetings match"), none.content)
+        assertTrue(AskScope(format = "General").matches(hiring, 0))
+        assertFalse(AskScope(format = "1:1").matches(hiring, 0))
     }
 
     @Test

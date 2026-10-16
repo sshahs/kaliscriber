@@ -298,6 +298,8 @@ data class AskMessage(
     val isError: Boolean = false,
     /** The user stopped the answer while it was being written; [content] is what had arrived. */
     val stopped: Boolean = false,
+    /** For a question: which meetings it was limited to (see [com.kaliscriber.core.ask.AskScope.describe]); empty for all. */
+    val scope: String = "",
 )
 
 /** A meeting an answer cites, optionally at a moment in its transcript. */

@@ -177,6 +177,8 @@ class AppContainer(context: Context) {
         settings,
         corpus = { searchIndex },
     )
+    /** Which meetings "Ask all" questions are about, kept while the app runs. */
+    val askScope = kotlinx.coroutines.flow.MutableStateFlow(com.kaliscriber.core.ask.AskScope())
     /** Recaps across a week of meetings. */
     val recaps = WeeklyRecaps(
         meetings, ai, settings,

@@ -65,7 +65,15 @@ import com.kaliscriber.core.model.AskMessage
 import com.kaliscriber.core.model.AskSource
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.transcript.TranscriptFormatter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import com.kaliscriber.core.ask.AskScope
+import com.kaliscriber.core.ai.SummaryFormats
+import com.kaliscriber.core.library.MeetingList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,6 +91,22 @@ class AskAllViewModel(private val container: AppContainer) : ViewModel() {
 
     private var job: Job? = null
 
+    /** Which meetings questions are about; kept while the app runs. */
+    val scope: StateFlow<AskScope> = container.askScope
+
+    fun setScope(value: AskScope) {
+        container.askScope.value = value
+    }
+
+    /** Named people and summary formats across the meetings, for the filter chips. */
+    val choices: StateFlow<Pair<List<String>, List<String>>> = container.meetings.meetings
+        .map { all ->
+            val custom = container.settings().customFormats
+            MeetingList.people(all) to all.map { SummaryFormats.of(it, custom).label }.distinct().sorted()
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<String>() to emptyList())
+
     /** Stops the answer being written; what has arrived so far is kept. */
     fun stop() {
         job?.cancel()
@@ -94,7 +118,7 @@ class AskAllViewModel(private val container: AppContainer) : ViewModel() {
         // The app scope keeps the request going if the user leaves the screen.
         job = container.scope.launch {
             try {
-                container.libraryAsk.ask(question) { _answering.value = it }
+                container.libraryAsk.ask(question, scope.value) { _answering.value = it }
             } finally {
                 _answering.value = null
                 _thinking.value = false
@@ -118,6 +142,8 @@ fun AskAllScreen(
     val messages by vm.messages.collectAsStateWithLifecycle()
     val thinking by vm.thinking.collectAsStateWithLifecycle()
     val answering by vm.answering.collectAsStateWithLifecycle()
+    val scope by vm.scope.collectAsStateWithLifecycle()
+    val choices by vm.choices.collectAsStateWithLifecycle()
     // Hidden as soon as the finished answer is in the conversation.
     val partial = answering?.takeIf { messages.lastOrNull()?.role == ChatRole.USER }
     var input by rememberSaveable { mutableStateOf("") }
@@ -155,6 +181,7 @@ fun AskAllScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
+            ScopeRow(scope, choices.first, choices.second, onChange = vm::setScope)
             if (messages.isEmpty() && !thinking) {
                 Column(
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
@@ -202,7 +229,7 @@ fun AskAllScreen(
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    placeholder = { Text("Ask across all meetings…") },
+                    placeholder = { Text(if (scope.active) "Ask about these meetings…" else "Ask across all meetings…") },
                     modifier = Modifier.weight(1f),
                     maxLines = 4,
                 )
@@ -233,6 +260,9 @@ private fun MessageBubble(message: AskMessage, onOpenSource: (AskSource) -> Unit
         ) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (mine || message.isError) {
+                    if (mine && message.scope.isNotBlank()) {
+                        Text("Only ${message.scope}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Text(message.content, style = MaterialTheme.typography.bodyMedium)
                     if (message.isError) ErrorFixButton(message.content, onOpenSettings = onOpenSettings)
                 } else {
