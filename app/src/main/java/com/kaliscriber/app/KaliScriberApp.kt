@@ -198,7 +198,7 @@ class AppContainer(context: Context) {
     )
     /** Events from the CalDAV calendar, for meeting titles, invitees and prep. */
     val calendar = CalendarService(http, settings, secrets, com.kaliscriber.app.calendar.PhoneCalendar(appContext))
-    val recorder = RecordingManager(appContext, meetings, pipeline, settings, scope, onStart = { meetingId ->
+    val recorder: RecordingManager = RecordingManager(appContext, meetings, pipeline, settings, scope, onStart = { meetingId ->
         // Start fetching speaker detection now so it is ready when the meeting ends.
         if (speakerPackMissing) models.downloadDiarization()
         // A meeting on the calendar right now gives the recording its title and invitees; one being
@@ -210,7 +210,7 @@ class AppContainer(context: Context) {
     })
 
     /** Records calendar meetings by themselves, from their start to their end. */
-    val autoRecorder = AutoRecorder(
+    val autoRecorder: AutoRecorder = AutoRecorder(
         appContext, calendar, recorder, pipeline, settings, visibility,
         JsonValueStore(File(filesDir, "auto-record.json"), AutoRecord.State.serializer(), AutoRecord.State()),
     )
