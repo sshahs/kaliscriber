@@ -647,6 +647,12 @@ fun TranscriptTab(meeting: Meeting, vm: MeetingViewModel, focusSegmentId: String
                         .fillMaxWidth()
                         .background(background)
                         .combinedClickable(
+                            onClickLabel = when {
+                                selection.isEmpty() -> "Play from here"
+                                seg.id in selection -> "Unselect"
+                                else -> "Select"
+                            },
+                            onLongClickLabel = if (seg.id in selection) "Unselect" else "Select to ask, edit or share",
                             onClick = { if (selection.isNotEmpty()) vm.toggleSelection(seg.id) else vm.player.seekTo(seg.startMs) },
                             onLongClick = { vm.toggleSelection(seg.id) },
                         )

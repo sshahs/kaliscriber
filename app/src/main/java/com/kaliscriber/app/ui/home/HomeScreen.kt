@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.input.ImeAction
 import com.kaliscriber.core.ai.MeetingType
 import com.kaliscriber.core.library.MeetingList
@@ -393,7 +394,7 @@ fun HomeScreen(
                                 heading,
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 8.dp, start = 4.dp),
+                                modifier = Modifier.padding(top = 8.dp, start = 4.dp).semantics { heading() },
                             )
                         }
                         items(group, key = { it.id }) { meeting ->

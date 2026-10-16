@@ -45,6 +45,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -66,15 +68,15 @@ import com.kaliscriber.core.transcript.TranscriptFormatter
 
 /** A round avatar with the speaker's initials in their colour; decorative, since their name is shown beside it. */
 @Composable
-fun SpeakerAvatar(speaker: Speaker?, modifier: Modifier = Modifier.size(32.dp)) {
-    val color = speaker?.let { speakerColor(it.colorIndex) } ?: MaterialTheme.colorScheme.outline
+fun SpeakerAvatar(speaker: Speaker?, modifier: Modifier = Modifier.size(32.dp)) =
+    NameAvatar(speaker?.name ?: "?", speaker?.colorIndex, modifier)
+
+/** Initials in a coloured circle; without a [colorIndex] the colour comes from the name, so it stays the same. */
+@Composable
+fun NameAvatar(name: String, colorIndex: Int? = null, modifier: Modifier = Modifier.size(40.dp)) {
+    val color = speakerColor(colorIndex ?: name.trim().lowercase().hashCode())
     Box(modifier.clip(CircleShape).background(color.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
-        Text(
-            Initials.of(speaker?.name ?: "?"),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = color,
-        )
+        Text(Initials.of(name), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = color)
     }
 }
 
@@ -112,7 +114,7 @@ fun SectionCard(title: String, icon: ImageVector? = null, modifier: Modifier = M
                     Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             }
             content()
         }

@@ -139,6 +139,14 @@ data class ProviderSettings(
     val reasoningEffort: String = "",
 )
 
+/** Light or dark look, or following the phone. */
+@Serializable
+enum class ThemeMode(val label: String) {
+    SYSTEM("Same as the phone"),
+    LIGHT("Light"),
+    DARK("Dark"),
+}
+
 /** Who reads text aloud. */
 @Serializable
 enum class TtsEngine(val displayName: String) {
@@ -214,6 +222,9 @@ data class AppSettings(
     val setupDone: Boolean = false,
     /** Summary formats the user made, offered alongside the built-in ones. */
     val customFormats: List<CustomFormat> = emptyList(),
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** Colours taken from the wallpaper (Android 12 and later) instead of the app's own. */
+    val dynamicColor: Boolean = true,
 ) {
     fun settingsFor(id: ProviderId): ProviderSettings = providers[id] ?: ProviderSettings()
 

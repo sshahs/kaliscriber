@@ -9,7 +9,13 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import android.graphics.Color
+import androidx.activity.SystemBarStyle
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.kaliscriber.app.ui.theme.isDark
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -35,7 +41,17 @@ class MainActivity : ComponentActivity() {
         // A recreated activity has already handled the intent it was started with.
         if (savedInstanceState == null) handle(intent)
         setContent {
-            KaliScriberTheme {
+            val settings by container.settingsStore.value.collectAsState()
+            val dark = isDark(settings.themeMode)
+            // System bar icons follow the app's theme, which may differ from the phone's.
+            DisposableEffect(dark) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
+                    navigationBarStyle = SystemBarStyle.auto(LIGHT_SCRIM, DARK_SCRIM) { dark },
+                )
+                onDispose {}
+            }
+            KaliScriberTheme(settings.themeMode, settings.dynamicColor) {
                 AppNavigation(openTasks = openTasks)
             }
         }
@@ -113,6 +129,10 @@ class MainActivity : ComponentActivity() {
             Intent(context, MainActivity::class.java)
                 .setAction(ACTION_RECORD)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+        /** The scrims Android uses behind three-button navigation, as in enableEdgeToEdge's defaults. */
+        private val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+        private val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
     }
 }
 

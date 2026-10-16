@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.ListItem
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -77,6 +78,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -127,6 +130,7 @@ enum class SettingsPage(val title: String, val summary: String, val keywords: Li
         "Export destinations", "Email, Google Docs, Notion, AFFiNE, Baikal/CalDAV and a Markdown folder",
         listOf("email", "Google Docs", "Drive", "Notion", "AFFiNE", "Baikal", "CalDAV", "calendar", "tasks", "Markdown", "Obsidian", "folder", "sync", "vault"),
     ),
+    APPEARANCE("Appearance", "Light or dark, and wallpaper colours", listOf("theme", "dark mode", "light mode", "night", "colours", "colors", "Material You", "wallpaper")),
     DATA("Data & storage", "Space used, keeping recordings, backup and restore", listOf("storage", "space", "delete recordings", "keep recordings", "backup", "restore", "password")),
     ;
 
@@ -147,6 +151,7 @@ private fun SettingsPage.icon(): ImageVector = when (this) {
     SettingsPage.SEARCH -> Icons.Filled.Search
     SettingsPage.REMINDERS -> Icons.Filled.Notifications
     SettingsPage.EXPORT -> Icons.Filled.IosShare
+    SettingsPage.APPEARANCE -> Icons.Filled.Palette
     SettingsPage.DATA -> Icons.Filled.Storage
 }
 
@@ -257,6 +262,7 @@ fun SettingsScreen(onBack: () -> Unit, initialPage: SettingsPage? = null) {
                     item { ExportSection(settings, vm) }
                     item { MarkdownFolderSection(settings, vm) }
                 }
+                SettingsPage.APPEARANCE -> item { AppearanceSection(settings, vm) }
                 SettingsPage.DATA -> {
                     item { StorageSection(settings, vm) }
                     item { BackupSection(vm) }
@@ -1121,12 +1127,16 @@ private fun ProcessingSettings(settings: AppSettings, vm: SettingsViewModel) {
 
 @Composable
 internal fun ToggleRow(title: String, body: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    // One switch for screen readers: the row toggles, reading out the title and description.
+    Row(
+        Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Switch, onValueChange = onChange).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyMedium)
             Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(8.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }

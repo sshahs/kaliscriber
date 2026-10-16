@@ -47,6 +47,7 @@ import androidx.lifecycle.viewModelScope
 import com.kaliscriber.app.AppContainer
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.ui.common.EmptyState
+import com.kaliscriber.app.ui.common.NameAvatar
 import com.kaliscriber.core.people.People
 import com.kaliscriber.core.tasks.ActionItems
 import com.kaliscriber.core.transcript.TranscriptFormatter
@@ -106,9 +107,9 @@ fun PeopleTab(onOpenPerson: (String) -> Unit, modifier: Modifier = Modifier) {
             }
         }
         items(shown, key = { it.name }) { person ->
-            Card(Modifier.fillMaxWidth().clickable { onOpenPerson(person.name) }) {
+            Card(Modifier.fillMaxWidth().clickable(onClickLabel = "Open ${person.name}'s page") { onOpenPerson(person.name) }) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (person.voiceProfileId != null) Icons.Filled.RecordVoiceOver else Icons.Filled.Person, null, tint = MaterialTheme.colorScheme.primary)
+                    NameAvatar(person.name)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(person.name, style = MaterialTheme.typography.titleMedium)
@@ -117,6 +118,7 @@ fun PeopleTab(onOpenPerson: (String) -> Unit, modifier: Modifier = Modifier) {
                                 "${person.meetings.size} meeting${if (person.meetings.size == 1) "" else "s"}",
                                 person.lastSeen?.let { "last ${date(it)}" },
                                 person.openItems.size.takeIf { it > 0 }?.let { "$it open task${if (it == 1) "" else "s"}" },
+                                "voice remembered".takeIf { person.voiceProfileId != null },
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
