@@ -247,6 +247,9 @@ class AutoRecorder(
         tick()
     }
 
+    /** True while [active] is being recorded. */
+    fun isRecording(active: AutoRecord.Active): Boolean = recorder.isCapturing(active.meetingId)
+
     /** The next meeting that will be recorded, for showing ahead of time. */
     fun upcoming(st: AutoRecord.State = state.value): CalendarEvent? {
         val now = System.currentTimeMillis()

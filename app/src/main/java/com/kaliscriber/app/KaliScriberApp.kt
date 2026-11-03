@@ -315,6 +315,14 @@ class AppContainer(context: Context) {
                     runCatching { autoRecorder.tick(refresh = true) }.onFailure { Log.w("KaliScriber", "Auto-record check failed", it) }
                 }
         }
+        // The next-recording widget follows the schedule, the calendar and the recorder.
+        scope.launch {
+            kotlinx.coroutines.flow.combine(autoRecorder.state, settingsStore.value, recorder.state) { a, s, r ->
+                Triple(a, listOf(s.autoRecord, s.autoRecordWhich, s.scheduledRecordings, s.recordingPausedUntil), r.javaClass)
+            }
+                .distinctUntilChanged()
+                .collect { runCatching { com.kaliscriber.app.autorecord.NextRecordingWidget.update(appContext) } }
+        }
         // A recording stopped by hand, or one that ended, may change what's next.
         scope.launch {
             recorder.state

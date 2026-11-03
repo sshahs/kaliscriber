@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val openTasks = intent?.getBooleanExtra(TaskReminders.EXTRA_OPEN_TASKS, false) == true
+        val openSchedule = intent?.getBooleanExtra(EXTRA_OPEN_SCHEDULE, false) == true
         // A recreated activity has already handled the intent it was started with.
         if (savedInstanceState == null) handle(intent)
         setContent {
@@ -52,7 +53,7 @@ class MainActivity : ComponentActivity() {
                 onDispose {}
             }
             KaliScriberTheme(settings.themeMode, settings.dynamicColor) {
-                AppNavigation(openTasks = openTasks)
+                AppNavigation(openTasks = openTasks, openSchedule = openSchedule)
             }
         }
     }
@@ -124,6 +125,8 @@ class MainActivity : ComponentActivity() {
         /** Opens the app and starts recording (Quick Settings tile, widget). */
         const val ACTION_RECORD = "com.kaliscriber.app.action.RECORD"
         const val EXTRA_RECORD = "com.kaliscriber.app.extra.RECORD"
+        /** Opens the app on the Schedule tab (from the next-recording widget). */
+        const val EXTRA_OPEN_SCHEDULE = "com.kaliscriber.app.extra.OPEN_SCHEDULE"
 
         fun recordIntent(context: android.content.Context): Intent =
             Intent(context, MainActivity::class.java)

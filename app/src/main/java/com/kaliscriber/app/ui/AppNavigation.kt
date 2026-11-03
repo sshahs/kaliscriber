@@ -44,9 +44,9 @@ object Routes {
     fun askAll(question: String? = null) = "ask-all" + (question?.let { "?q=${Uri.encode(it)}" } ?: "")
 }
 
-/** [openTasks] starts on the task list (from the reminder notification). */
+/** [openTasks] starts on the task list (from the reminder notification), [openSchedule] on the Schedule tab. */
 @Composable
-fun AppNavigation(openTasks: Boolean = false) {
+fun AppNavigation(openTasks: Boolean = false, openSchedule: Boolean = false) {
     val nav = rememberNavController()
     val launches = appContainer().launches
     val request by launches.pending.collectAsStateWithLifecycle()
@@ -79,7 +79,11 @@ fun AppNavigation(openTasks: Boolean = false) {
                 onEditSchedule = { nav.navigate(Routes.scheduleEdit(it)) },
                 onOpenSettingsPage = { nav.navigate(Routes.settings(it)) },
                 onOpenSetup = { nav.navigate(Routes.SETUP) { launchSingleTop = true } },
-                startTab = if (openTasks) 2 else 0,
+                startTab = when {
+                    openTasks -> 2
+                    openSchedule -> 4
+                    else -> 0
+                },
             )
         }
         composable(Routes.SETUP) {
