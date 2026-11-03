@@ -1,176 +1,243 @@
-# KaliScriber
+<div align="center">
 
-An Android AI note taker, meeting transcriber and summariser that runs on **your own AI keys (BYOK)**.
+# 🎙️ KaliScriber
 
-## Features
+**Your meetings, written up for you: recorded, transcribed, summarised and searchable, on your phone and on your own AI keys.**
 
-**Getting around**
-- A **setup wizard** on first run: on-device or cloud transcription (with the model download), your AI provider and key with a test, permissions, and a test recording.
-- **Bottom navigation** for Meetings, Notes, Tasks and People. Meetings are grouped by day and can be filtered by person, summary format or needing attention.
-- **Undo instead of confirmations**: swipe left to delete a meeting or note; deleting a recording or merging speakers can be undone for a few seconds too.
-- **Errors point to the fix** (the right Settings page, or Try again), and a notification says when a meeting's notes are ready.
-- **Settings** opens on short pages with a search box.
-- **Light or dark** (or follow the phone), with or without wallpaper colours (Settings → Appearance). Screen readers get labelled controls and headings.
+[![Latest release](https://img.shields.io/github/v/release/sshahs/kaliscriber?label=release&color=4f46e5)](https://github.com/sshahs/kaliscriber/releases/latest)
+[![Android CI](https://github.com/sshahs/kaliscriber/actions/workflows/android.yml/badge.svg)](https://github.com/sshahs/kaliscriber/actions/workflows/android.yml)
+![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3ddc84?logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7f52ff?logo=kotlin&logoColor=white)
+![BYOK](https://img.shields.io/badge/AI-bring%20your%20own%20key-0e7c86)
 
-**Meetings**
-- Record meetings in a foreground service (keeps going with the screen off) with a **live transcript** that updates every few seconds.
-- **Speaker detection.** When the app can't tell who is speaking, it gives that speaker a **random placeholder name** (e.g. *Amber Falcon*). You can rename speakers at any time, accept AI name suggestions ("AI thinks this is Priya, who introduced herself at 00:12"), merge two speakers, or move selected lines to another or a new speaker.
-- When recording stops, the whole meeting is re-transcribed with a speaker-aware model (if your provider has one) for consistent speakers. If it doesn't, the AI model separates speakers from the text.
-- **Insights:** summary, action items (with owner, due date and priority, which you can tick off), key points, decisions, highlights (tap to play that moment), topics, risks, next steps and tone.
-- **Summary formats** for 1:1s, stand-ups, sales calls, interviews and lectures add sections that matter for that kind of meeting (e.g. done, next and blockers per person at a stand-up). The format is guessed from the meeting or calendar title and can be changed on the summary.
-- **Your own summary formats** (Settings → Summary formats): name a format, say what kind of meeting it is for and list its sections, optionally starting from a built-in one. Give it title words ("tickets, support review") and matching meetings use it by themselves.
-- **Agenda:** give a meeting an agenda (on its Summary tab, or in its schedule) and the notes follow it, marking each item covered or not with what was said about it.
-- **Since last time:** a meeting with the same title (dates aside) or calendar event as an earlier one shows what that meeting decided and which of its action items are still open or done, with a link back to it.
+[**Download**](#-install) · [Features](#-features) · [Privacy](#-privacy) · [AI services](#-ai-services) · [How it works](#-how-it-works) · [Build](#-build-it-yourself)
+
+</div>
+
+---
+
+KaliScriber is an Android meeting note taker. Press record (or let your calendar or schedule do it), and when the meeting ends you get a transcript that knows who said what, a summary, action items with owners and due dates, decisions, and answers to anything you ask about it. Speech is transcribed **on the phone** by default, and the notes are written by the AI provider **you** choose, with **your** key.
+
+## ✨ Highlights
+
+- 🔒 **Private by design.** On-device transcription and speaker detection; only text goes to your chosen AI. No accounts, no servers of ours.
+- 🗣️ **Knows who's talking.** Speakers are told apart on the phone, named from what they say, and remembered by voice in later meetings.
+- 📝 **Notes that write themselves.** Summary, action items, decisions, highlights, risks and next steps, in a format that fits the meeting (1:1, stand-up, sales call, interview, lecture, or your own).
+- 📅 **Records by itself.** Schedule recordings in the app, or let it record meetings from your calendar, from start to finish.
+- 🔎 **Ask across everything.** "What did we decide about pricing last month?" gets an answer from all your meetings, with links to the exact moments.
+- ✅ **Tasks that stay in step.** Every action item in one list, synced both ways with your CalDAV calendar (Baikal and others).
+- 🔁 **Your data, your way.** Export to Notion, AFFiNE, Google Docs, email, a Markdown folder (Obsidian) or CalDAV, with encrypted automatic backups.
+
+## 📲 Install
+
+Grab the latest APK from **[Releases](https://github.com/sshahs/kaliscriber/releases/latest)** and open it on your phone (Android 8.0 or later; allow installs from your browser or file manager).
+
+| APK | For | Size |
+|---|---|---|
+| `arm64-v8a` | almost every phone from the last ten years | ~15 MB |
+| `armeabi-v7a` | older 32-bit phones | ~14 MB |
+| `universal` | if you're not sure | ~53 MB |
+| `x86_64` | emulators and Intel/AMD devices | ~17 MB |
+
+Every release is signed with the same key, so new versions install over old ones and keep your meetings.
+
+<details>
+<summary><b>Updating automatically with Obtainium</b></summary>
+
+1. In [Obtainium](https://github.com/ImranR98/Obtainium), add `https://github.com/sshahs/kaliscriber`.
+   For a self-hosted Gitea or Forgejo mirror, add its repository URL and choose **Codeberg (Forgejo)** under *Override source*. Without that, Obtainium treats the page as plain HTML and only ever sees one APK.
+2. In the app's options, set **Filter APKs by regular expression** to `arm64-v8a\.apk$` (or turn on filtering by CPU architecture).
+3. Leave **Include prereleases** off to get official releases only. Prereleases are the build of every commit.
+
+</details>
+
+**First run:** a short setup wizard walks you through choosing on-device or cloud transcription (and downloading the model), adding your AI key with a test, allowing the microphone and notifications, and a test recording.
+
+## 🧩 Features
+
+### 🎙️ Record and transcribe
+- **Records with the screen off**, with a **live transcript** that updates every few seconds and a big, glanceable recording screen (timer, waveform, *Mark this moment*, hold-to-stop).
+- **Bookmarks:** tap *Mark*, use the notification, or press play/pause on your headphones when something matters. Marked moments get extra weight in the notes.
+- **Interruptions are noticed:** if a call or another app takes the microphone, the gap is marked in the transcript and the AI is told nothing was recorded.
+- **Cleaner audio** with noise suppression, and a choice of microphone: phone, wired or USB headset, or Bluetooth.
+- **Bring audio in:** share a recording, voice note or video to KaliScriber, import an audio file, or import a transcript from Zoom, Teams, Google Meet or Otter (WebVTT, SRT, Word or text).
+- **One-tap recording** from a Quick Settings tile or a home-screen widget.
+
+### 🗣️ Speakers
+- **Speaker detection on the phone.** Until a speaker is named they get a placeholder (*Amber Falcon*). Rename, merge, move lines between speakers, or accept the AI's suggestion ("this is Priya, who introduced herself at 00:12").
+- **Voice memory:** name someone once and they're recognised in later meetings. Voiceprints never leave the phone.
+- **Speakers named as you go:** every ten minutes the live transcript is labelled with who's speaking.
 - **Talk time:** each person's share of the talking, turns, questions and longest stretch.
-- **Share a clip:** the share button on a highlight or bookmark, or *Share clip* on selected transcript lines, sends that stretch of audio (a small M4A) with what was said in it.
-- **Ask AI** about the meeting, or about a part of it: long-press lines in the transcript, then tap *Ask AI*. Answers cite timestamps and appear as the AI writes them; *Stop* ends an answer early and keeps what arrived.
-- **Find in transcript:** highlight matches, step through them, or show one speaker's lines.
-- **Search all meetings:** the search box on the home screen (which also asks the AI when you type a question) looks through titles, people, summaries, action items and every transcript line, with word forms matched ("price" finds "pricing"). Tap a result to open the transcript at that line.
-- **Ask all meetings:** ask a question about everything you've recorded ("What did we decide about pricing last month?"). The app finds the relevant meetings and passages, the AI answers from them, and each answer lists its sources. Tap a source to jump to that moment. With **smart search** (Settings, an optional 30 MB on-device model) it also finds passages by meaning, so a question about cost finds talk about prices. Filters narrow questions to the last week, month, three months or year, to one person and to one summary format.
-- **Weekly recap** (the calendar button on the home screen): the AI's account of a week of meetings, written from their notes (what happened, decisions, themes, risks and what to follow up), with the week's open action items by person and what's due next week. Share it as Markdown, have it read aloud, or get it as a notification on Friday afternoons (Settings → Reminders).
-- **Tasks:** every action item from every meeting in one list, grouped into overdue, due today, next 7 days, later and no date. Filter by person, tick items off, or edit the task, owner and due date. Edits and ticks are kept when a summary is regenerated. An optional daily reminder (Settings → Action item reminders) lists what's overdue or due that day.
-- **People:** a page per person from your meetings (named speakers, action item owners and saved voices), with their open tasks, notable quotes, the meetings they were in and how long they spoke, plus one tap to ask the AI about them. First names are matched to full names ("Priya" → "Priya Sharma").
-- **Glossary:** names, products and jargon that speech recognition gets wrong (Settings → Glossary, one per line). The AI spells them correctly in summaries and answers, and after each meeting it fixes misheard versions in the transcript (also available from a meeting's menu). With an on-device Parakeet model, the recogniser also listens out for them while you record.
-- **Gaps & questions:** the AI finds what's missing (tasks without owners or deadlines, vague references, unanswered questions…) and asks *you* questions. Your answers are stored with the meeting and fed back into the summary and Ask AI.
-- Play the recording with the transcript following along, edit lines, import existing audio files, share as Markdown, or save as a note.
-- **Share to KaliScriber:** share a recording, voice note or video from another app (or open an audio file with KaliScriber) and it becomes a meeting, transcribed and summarised in the background. Only the sound of a video is kept.
-- **Import transcripts** from Zoom, Teams, Google Meet, Otter and others (WebVTT, SRT, Word or text files) with the import button, Share or Open with. Speakers, times, title and date are read from the file, and the meeting gets the same summary, action items, search and Ask as a recording.
-- **Meeting prep:** with a CalDAV calendar set up, Home shows the meeting in progress or coming up next, who is invited, what is still open with them and your last meeting with them, plus *Prepare* and *Record* buttons.
-- **Processing details** (meeting menu): each processing step with how long it took, and how long the meeting took to be ready after recording stopped.
-- **Quick Settings tile and home-screen widget** to start recording in one tap.
-- **AI usage & cost** (Settings): tokens used this month by model and, once you enter prices, the cost; each meeting's processing details list what its requests used.
-- **Storage** (Settings): what recordings, meetings, models and the search index take up, and *Keep recordings* (30 days to a year) to delete older recordings while keeping transcripts, summaries and notes. A meeting's menu can delete just its recording.
-- **Backup & restore** (Settings): meetings, transcripts, notes, saved voices and settings (optionally recordings) in one password-encrypted file (AES-256-GCM). API keys are never included. Restoring only adds what the phone doesn't have.
-- **Automatic backups** (Settings → Data & storage): the same encrypted backup made every day or week into a folder you choose (for example one synced with Google Drive or Nextcloud), keeping the newest few. Backups you make by hand are never deleted.
 
-**Speakers**
-- **Voice memory:** name a speaker once and the app recognises their voice in later meetings. Voiceprints are computed and stored only on the phone (Settings → Voice memory).
-- **How many people?** Set the number of participants while recording or afterwards, then tap *Re-detect speakers* for more accurate speaker separation.
+### 📝 Notes
+- **Insights:** summary, action items (owner, due date, priority), key points, decisions, highlights you can tap to replay, topics, risks, next steps and tone.
+- **Summary formats** for 1:1s, stand-ups, sales calls, interviews and lectures, guessed from the meeting's title, plus **your own formats** with the sections you want, applied by title words.
+- **Agenda:** give a meeting an agenda and the notes follow it, ticking each item covered or not with what was said.
+- **Since last time:** recurring meetings show what the previous one decided and which of its actions are still open.
+- **Gaps and questions:** the AI spots what's missing (tasks without owners, vague references, unanswered questions) and asks *you*; your answers improve the summary.
+- **Glossary:** names and jargon that speech recognition gets wrong are spelled right in notes and fixed in transcripts, and with Parakeet the recogniser listens out for them as you record.
+- **Share a clip** of a highlight, bookmark or lines as a small audio file with what was said.
 
-**During a meeting**
-- *Ask AI about the meeting so far* from the recording screen, e.g. "Catch me up on the last five minutes" or "What should I clarify right now?". Recording continues in the background.
-- **Speakers named as you go:** every ten minutes the live transcript is labelled with who is speaking, and saved voices are named straight away. Names you give during the meeting are kept.
-- **Bookmarks:** tap *Mark* (or *Bookmark* in the notification, or press play/pause on your headphones) when something important is said, optionally with a note. Marked moments get extra weight in the notes and summary.
-- **Schedule tab:** record meetings at set times, calendar or not. Each schedule has a name, a date and a start and end time; it can repeat every day, on weekdays, every week or on chosen days, and sets the notes format (built in or your own), how many people take part, an optional reminder beforehand and an agenda. Repeats can end on a date, schedules can be paused one at a time or all together until a date (for a holiday), and duplicated. The tab lists everything coming up in the week (calendar meetings too, when auto-record is on), each of which can be skipped. A home-screen widget shows the next recording with Skip and Record now.
-- **Auto-record calendar meetings** (Settings → Recording & notes): recording starts when a meeting on your calendar begins and stops when it ends. It reads the phone's calendars (Google, Exchange and others) and/or a CalDAV calendar, records every timed event or only those with other people invited, and lets you skip the next one. Meetings joined late still start; back-to-back meetings each get their own recording. On Android 11 and later, recording can only start by itself in the background if KaliScriber may *display over other apps* (or, on the lock screen, show full-screen notifications); otherwise a notification asks you to tap *Record*.
-- **Calendar:** a recording started during an event in your calendar (CalDAV or, if allowed, the phone's) takes its title and number of invitees, and the invitees' names help the AI name speakers.
-- **Interruptions:** when a phone call or another app takes the microphone, the recording screen and notification say so, and the gap is marked in the transcript and noted for the AI, so nothing missing is guessed at.
-- **Cleaner audio:** noise suppression and automatic volume (on by default), and a choice of microphone: the phone, a wired or USB headset, or a Bluetooth headset.
+### 📅 Schedule and calendar
+- **Schedule tab:** record at set times, once or repeating (every day, weekdays, weekly or on chosen days, with an end date). Each schedule sets its notes format, number of people, a reminder and an agenda. Pause one, or everything until a date (holidays), and skip any occurrence.
+- **Calendar auto-record:** recordings start when a calendar meeting begins and stop when it ends, from the phone's calendars (Google, Exchange…) or CalDAV. Late joins still start, back-to-back meetings get their own recordings, and you can keep recording past the end.
+- **Meeting prep:** Home shows the meeting in progress or next, who's invited, what's still open with them and your last meeting together.
+- **Next recording widget** with *Skip* and *Record now*.
 
-**Export** (the share icon on a meeting)
-- **Email:** the notes as plain text to your default recipients.
-- **Google Docs:** opens the notes in the Google Docs app as a Word file. One-tap upload to Drive is optional (see below).
-- **Notion:** creates a page under a parent page you choose, with headings, bullets and to-dos.
-- **AFFiNE:** creates a doc through the workspace MCP endpoint. If your server doesn't allow writing yet, the notes are copied and AFFiNE is opened so you can paste them.
-- **Baikal / CalDAV:** adds the meeting as a calendar event and each action item as a task (with due date and priority). Exporting again updates the same items, and from then on tasks stay in step both ways: tick or edit an action item here and its task follows, tick or edit the task in your calendar or tasks app and the action item follows.
-- **Markdown folder** (Settings → Export destinations): pick a folder, such as an Obsidian vault, and every finished meeting gets a Markdown note there with properties (date, people, format, open actions, tags), the notes and optionally the transcript. Notes follow the meeting: rewritten when it changes, renamed with it, removed when it's deleted.
+> On Android 11 and later an app can only start recording by itself in the background if it may *display over other apps* (or, on the lock screen, show full-screen notifications). Without that, a notification asks you to tap *Record*. The Schedule tab shows what's missing.
 
-**Notes**
-- Type or dictate notes, then have AI tidy them up, summarise them, extract action items, find gaps and questions, suggest a title, or follow your own instruction.
+### 🔎 Search and ask
+- **Ask AI** about a meeting, or about selected lines. Answers cite timestamps, appear as they're written, and can be stopped.
+- **Ask all meetings** with answers from everything you've recorded and links to the source moments. Narrow it by period, person or format. Optional **smart search** (a 30 MB on-device model) finds passages by meaning, not just words.
+- **Search** titles, people, summaries, action items and every transcript line, matching word forms ("price" finds "pricing").
+- **Find in transcript** with highlighted matches, or show one speaker's lines.
+- **Weekly recap:** the week's meetings, decisions, themes, risks and follow-ups, with open actions by person; optionally as a Friday notification.
 
-**Listening and talking**
-- Read aloud: the meeting summary, any Ask AI answer, or a note.
-- **Hands-free voice Q&A:** tap the voice button in *Ask AI*, ask your question out loud, and hear the answer, spoken sentence by sentence as it is written. It listens again after each answer and stops when you go quiet.
-- **Audio briefing:** a one-to-two minute spoken catch-up of the meeting, saved as an audio file you can play or share with someone who missed it.
-- Voices: the phone's built-in offline voice, or ElevenLabs.
+### ✅ Tasks and people
+- **Tasks:** every action item from every meeting, grouped by overdue, today, this week, later and no date. Tick, edit and filter by person, with an optional daily reminder.
+- **People pages** with each person's open tasks, notable quotes, meetings and talk time, plus one tap to ask about them.
 
-## Speech-to-text: on-device by default
+### 🎧 Listen and talk
+- **Read aloud** a summary, an answer or a note.
+- **Hands-free voice Q&A:** ask out loud and hear the answer sentence by sentence as it's written.
+- **Audio briefing:** a one-to-two-minute spoken catch-up of a meeting to play or share.
+- The phone's offline voice, or ElevenLabs.
 
-Transcription runs **on the phone** with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), so audio never leaves the device. Only text goes to the AI model you pick. Download a model once in **Settings → On-device speech**:
+### 📤 Export, sync and backup
+| | |
+|---|---|
+| **Email** | the notes as text to your default recipients |
+| **Google Docs** | opens the notes as a Word file in Docs; one-tap Drive upload optional |
+| **Notion** | a page with headings, bullets and to-dos under a parent page |
+| **AFFiNE** | a doc through the workspace MCP endpoint |
+| **Baikal / CalDAV** | the meeting as an event and action items as tasks, **kept in step both ways** |
+| **Markdown folder** | one note per meeting in a folder (an Obsidian vault, say), with properties, kept up to date |
+| **Backups** | password-encrypted (AES-256-GCM) by hand or **automatically** every day or week into a folder, keeping the newest few |
+| **Storage** | see what takes space and delete old recordings while keeping transcripts and notes |
+
+### 🎨 Comfort
+Light, dark or follow the phone, with wallpaper colours if you like. Undo instead of "are you sure?", errors that link to the fix, a notification when notes are ready, Settings in short searchable pages, and screen-reader friendly controls.
+
+## 🔒 Privacy
+
+| What | Where it goes |
+|---|---|
+| Audio | stays on the phone with on-device transcription (the default); sent only to your speech provider if you choose a cloud one |
+| Transcripts, notes, voiceprints | stored only on the phone |
+| Text for summaries and answers | sent only to the AI provider you picked, with your key |
+| API keys and passwords | encrypted with the Android Keystore, sent only to their own service, never put in backups |
+| Backups | encrypted with your password, written only where you choose; Android's own cloud backup is off |
+
+There is no KaliScriber server and no account.
+
+## 🧠 On-device speech
+
+Transcription runs on the phone with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). Download a model once in **Settings → Speech & voices**:
 
 | Model | Languages | Download |
 |---|---|---|
-| Parakeet TDT 0.6B v3 (recommended) | 25 European languages incl. English | 465 MB |
+| **Parakeet TDT 0.6B v3** (recommended) | 25 European languages incl. English | 465 MB |
 | Parakeet TDT 0.6B v2 | English | 460 MB |
 | Whisper Base / Tiny / Small | 99 languages | 198 / 111 / 610 MB |
 | SenseVoice | Chinese, Cantonese, English, Japanese, Korean | 155 MB |
 
-Silero VAD (1 MB) splits audio into utterances. The **speaker detection pack** (pyannote segmentation plus the NeMo TitaNet small speaker embedding model, 47 MB) tells voices apart on-device. It downloads together with a speech model, or on demand when a meeting ends without it. Recordings are processed in 10-minute blocks; every speaker found gets a voiceprint, and voiceprints are merged across the meeting, which matches people between blocks and rejoins one person the diarizer split in two. Lines are split at the word where the speaker changes. Speaker detection and other long jobs run under a foreground service, so they finish with the app in the background.
+Silero VAD (1 MB) splits audio into utterances, and a 47 MB **speaker pack** (pyannote segmentation plus NeMo TitaNet) tells voices apart. Recordings are processed in ten-minute blocks while you record; every speaker gets a voiceprint, and voiceprints are matched across blocks, which also rejoins one person the diarizer split in two. Lines are split at the word where the speaker changes. Prefer the cloud? Switch to ElevenLabs Scribe or any provider below.
 
-You can switch transcription to **ElevenLabs Scribe** (with speaker labels) or any of the cloud options below instead.
+## 🤖 AI services
 
-## Speed
+Bring your own key for any of these. Every base URL and model is editable, and *List models* and *List voices* show what your key can use.
 
-Most of the work happens while you are still recording, so results arrive soon after you stop:
-
-- **Speaker detection during the meeting.** Each ten minutes of audio is diarized on the phone as soon as it is recorded; when you stop, only the last stretch is left, and the blocks are joined by voiceprint. TitaNet small computes voiceprints about a third faster than the ERes2Net model used before, with the same accuracy on our tests.
-- **Streaming answers.** Ask and Ask all meetings show answers as they are written.
-- **Running notes.** Every ten minutes the AI writes short notes on what was said. The summary of a long meeting starts from those notes plus the last few minutes of transcript, so it is ready much sooner. (Regenerating the summary later reads the full transcript.)
-- **A quick model for background tasks** (Settings → Active services): running notes, speaker names, glossary fixes and search words can use a smaller, cheaper model while summaries and answers keep the main one.
-- **Prompt caching.** Every request about a meeting starts with the same text (rules, glossary, meeting), with the task last, so providers that cache prompts (DeepSeek, OpenAI, Gemini, and Claude with explicit cache markers) answer follow-up requests faster and cheaper.
-- **Light storage.** Transcripts stay on disk until a meeting is opened (only a short summary of each is kept in memory), and search and Ask all meetings read an on-device SQLite full-text index, so hundreds of meetings start and search quickly. Progress updates stay in memory instead of rewriting the meeting file.
-- **Optimised release build** (R8).
-
-## Supported AI services (BYOK)
-
-| Provider | Chat / insights | Transcription | Voice |
+| Provider | Notes & chat | Transcription | Voice |
 |---|---|---|---|
-| **On-device (sherpa-onnx)** | | ✓ default, with speaker detection | phone voice |
-| **Command Code** | ✓ with **zero data retention** switch | | |
-| **ElevenLabs** | | ✓ Scribe with speaker labels | ✓ |
+| **On-device (sherpa-onnx)** | | ✓ default, with speakers | phone voice |
+| **Command Code** | ✓ with **zero data retention** (on by default) | | |
+| **ElevenLabs** | | ✓ Scribe, with speakers | ✓ |
 | OpenAI | ✓ | ✓ (`gpt-4o-transcribe-diarize` labels speakers) | |
 | Anthropic Claude | ✓ | | |
-| Google Gemini | ✓ (OpenAI-compatible endpoint) | | |
-| **Ollama Cloud** (ollama.com, not local) | ✓ native `/api/chat` with your API key | | |
+| Google Gemini | ✓ | | |
+| Ollama Cloud | ✓ | | |
 | Groq, Mistral | ✓ | ✓ | |
 | OpenRouter, DeepSeek | ✓ | | |
-| Deepgram, AssemblyAI | | ✓ with speaker labels | |
-| Custom OpenAI-compatible server | ✓ | ✓ | |
+| Deepgram, AssemblyAI | | ✓ with speakers | |
+| Any OpenAI-compatible server | ✓ | ✓ | |
 
-**Command Code** uses the Provider API at `https://api.commandcode.ai/provider/v1`, which needs a plan with API access. Claude models go over the Anthropic Messages wire and all other models over Chat Completions. **ZDR is on by default**: every request carries `x-cmd-zdr: 1`, so Command Code only routes to upstreams that retain nothing, and a model without a ZDR route fails with a clear message rather than silently falling back. Turn it off per provider in Settings.
+<details>
+<summary>Details for Command Code, models per task and costs</summary>
 
-Pick the services for chat, transcription and voice in **Settings**. Every provider's base URL and model are editable. *List models* and *List voices* fetch what your key can use. API keys are encrypted with the Android Keystore and only sent to their own provider. Recordings, transcripts and notes stay on the device, and backups are disabled.
+- **Command Code** uses the Provider API at `https://api.commandcode.ai/provider/v1` (a plan with API access is needed): Claude models over the Anthropic Messages wire, others over Chat Completions. With **ZDR** on, every request carries `x-cmd-zdr: 1`, so only upstreams that keep nothing are used, and a model without such a route fails clearly instead of silently falling back.
+- **A quick model for background work:** running notes, speaker names, glossary fixes and search words can use a smaller, cheaper model while summaries and answers keep the main one.
+- **Usage and cost:** Settings shows tokens per model this month and, once you enter prices, the cost; each meeting lists what its requests used.
 
-## How it works
+</details>
 
+## ⚡ Why it's fast
+
+- **Work happens while you record:** speakers are detected every ten minutes and the AI keeps running notes, so a long meeting's summary is ready soon after you stop.
+- **Streaming answers** appear as they're written.
+- **Prompt caching:** every request about a meeting starts with the same text, so providers that cache prompts (DeepSeek, OpenAI, Gemini, and Claude with explicit cache markers) answer follow-ups faster and cheaper.
+- **Light storage:** transcripts stay on disk until opened, and search uses an on-device SQLite full-text index, so hundreds of meetings stay quick.
+- **Optimised release build** with R8.
+
+## 🛠️ How it works
+
+```mermaid
+flowchart LR
+    mic([🎙️ Microphone]) --> rec[Recording service<br/>16 kHz PCM]
+    rec --> file[(recording.m4a)]
+    rec --> chunks[30 s chunks]
+    chunks --> stt[Live transcription<br/>on-device or cloud]
+    file --> dia[Speaker detection<br/>10-minute blocks]
+    stt --> pipe{{Meeting pipeline}}
+    dia --> pipe
+    pipe --> ai[AI model<br/>your key]
+    ai --> notes[Summary · actions · decisions<br/>agenda · questions]
+    notes --> out[Tasks · People · Search · Ask<br/>Exports · Backups]
 ```
-mic ─► AudioRecord (16 kHz PCM) ─┬─► AAC encoder ─► recording.m4a ─► final diarization pass ─┐
-                                 └─► 30 s WAV chunks ─► live transcription ──────────────────┤
-                                                                                             ▼
-             speaker placeholders ◄─ SpeakerAssigner ◄─ transcript segments ─► MeetingPipeline
-                                                                                             │
-             AI speaker separation · name suggestions · insights · gaps & questions · Q&A ◄─┘
+
+| Module | What's in it |
+|---|---|
+| `core/` | plain Kotlin/JVM: provider clients (OkHttp, kotlinx.serialization), prompts, speaker logic, the meeting pipeline, scheduling, sync and storage, with unit tests (MockWebServer) |
+| `app/` | the Android app in Jetpack Compose and Material 3: recording service and audio engine, on-device speech, Keystore secrets, widgets, workers and screens |
+
+## 🧪 Build it yourself
+
+You need JDK 17+ and the Android SDK (API 35). The first build downloads the sherpa-onnx AAR (50 MB, checksum-verified) into `app/libs/`.
+
+```bash
+./gradlew :core:test           # unit tests for the AI, pipeline and sync layers
+./gradlew :app:assembleDebug   # app/build/outputs/apk/debug/app-debug.apk
 ```
 
-- `core/`: a plain Kotlin/JVM module with all provider clients (OkHttp + kotlinx.serialization), prompts, speaker logic, the meeting pipeline and JSON file storage. It is unit-tested with MockWebServer.
-- `app/`: the Android app in Jetpack Compose and Material 3: recording service and audio engine, Keystore secret storage, and the screens.
+<details>
+<summary><b>Releases and signing</b></summary>
 
-## Download
+GitHub Actions runs the tests and builds the APKs on every push. Pushes to `main` are published as prereleases (`build-<N>`), and official releases (`v<version>`) are published by running the workflow with *publish*, using the notes in `.github/release-notes/`.
 
-Every push to `main` publishes signed APKs on the [Releases page](https://github.com/sshahs/kaliscriber/releases): `arm64-v8a` for almost every current phone (about 25 MB), `armeabi-v7a` for older 32-bit phones, `x86_64` for emulators, and a `universal` APK. Open one on your phone to install (Android 8.0+). Every release is signed with the same permanent key, so newer builds install as updates.
+Releases are signed with the key in the `KALISCRIBER_KEYSTORE_BASE64` (a base64 keystore with alias `kaliscriber`) and `KALISCRIBER_KEYSTORE_PASSWORD` repository secrets. Every APK is checked against the certificate in `.github/signing-cert-sha256` before it's published, so a build signed with any other key (which wouldn't install as an update) is never released. Without the secrets, builds use a temporary key and nothing is published.
 
-The key comes from the `KALISCRIBER_KEYSTORE_BASE64` (a base64-encoded keystore with alias `kaliscriber`) and `KALISCRIBER_KEYSTORE_PASSWORD` repository secrets, and CI checks each APK against the certificate in `.github/signing-cert-sha256` before publishing it. Releases can't be published without the secrets; plain builds without them use a temporary key and aren't published.
+</details>
 
-### Export setup
+<details>
+<summary><b>Building on Gitea with act_runner</b></summary>
+
+`.gitea/workflows/android.yml` builds the app on a Gitea instance with [act_runner](https://docs.gitea.com/usage/actions/act-runner), for example on a pull mirror of this repository. Each mirror sync that brings new commits runs the tests and builds the APKs, which you can download from the run. Gitea uses `.gitea/workflows` and ignores `.github/workflows` when that directory exists.
+
+1. **Enable Actions** on the repository (Settings → Repository → Actions) and on the instance.
+2. **Register a runner** with an `ubuntu-latest` label pointing at an image with Node.js, such as `ubuntu-latest:docker://gitea/runner-images:ubuntu-latest` (act_runner's default). The workflow installs Java 17 and the Android SDK itself. A build needs about 4 GB of memory and access to Maven Central, Google's Maven repository and GitHub.
+3. **Add the same signing secrets** as on GitHub under the repository's Settings → Actions → Secrets. Without them builds use a throwaway key and nothing is published.
+
+When the mirror brings a `v<version>` tag, the Gitea build of that tag publishes a release on it in the Gitea repository, with the APKs and links to the Gitea commit and run. Gitea never creates tags of its own (a pull mirror deletes local tags at its next sync), so builds started by hand or from a branch produce artifacts only.
+
+</details>
+
+<details>
+<summary><b>Export setup</b></summary>
 
 | Target | What you need |
 |---|---|
-| Notion | An internal integration secret (notion.so/profile/integrations), and the parent page connected to that integration |
-| AFFiNE | Workspace id and a read-write MCP token (workspace settings → Integrations → MCP Server) |
-| Baikal / CalDAV | Calendar URL such as `https://<server>/dav.php/calendars/<user>/<calendar>/`, plus username and password (Basic and Digest auth are supported) |
-| Google Docs upload | Optional: an Android OAuth client for package `com.kaliscriber.app` with the SHA-1 shown in Settings, and the Drive API enabled. Without it, notes open in Google Docs as a Word file |
+| Notion | an internal integration secret (notion.so/profile/integrations), with the parent page connected to it |
+| AFFiNE | the workspace id and a read-write MCP token (workspace settings → Integrations → MCP Server) |
+| Baikal / CalDAV | a calendar URL such as `https://<server>/dav.php/calendars/<user>/<calendar>/`, a username and a password (Basic and Digest auth work) |
+| Google Docs upload | optional: an Android OAuth client for `com.kaliscriber.app` with the SHA-1 shown in Settings, and the Drive API enabled; without it notes open in Docs as a Word file |
 
-## Building on Gitea
-
-`.gitea/workflows/android.yml` builds the app on a Gitea instance with [act_runner](https://docs.gitea.com/usage/actions/act-runner), for example on a pull mirror of this GitHub repository. Each mirror sync that brings new commits runs the tests and builds the APKs, which you can download from the run's artifacts. Gitea uses `.gitea/workflows` and ignores `.github/workflows` when that directory exists.
-
-Setting it up:
-
-1. **Enable Actions** on the Gitea repository (Settings → Repository → Actions), with Actions enabled on the instance.
-2. **A runner** registered for the repository, owner or instance, with an `ubuntu-latest` label pointing at an image with Node.js, such as `ubuntu-latest:docker://gitea/runner-images:ubuntu-latest` (act_runner's default). The workflow installs Java 17 and the Android SDK itself. A build needs about 4 GB of memory and internet access to Maven Central, Google's Maven repository and GitHub.
-3. **The same signing secrets as on GitHub**, `KALISCRIBER_KEYSTORE_BASE64` and `KALISCRIBER_KEYSTORE_PASSWORD`, added under the Gitea repository's Settings → Actions → Secrets. Without them builds are signed with a throwaway key and nothing is published; APKs signed with a different key wouldn't install as updates. Every APK is checked against `.github/signing-cert-sha256`.
-
-**Releases on Gitea** are attached to the tags that arrive from GitHub: when the mirror brings a `v<version>` tag (an official release), the Gitea build of that tag publishes a release on it in the Gitea repository, with the APKs and a link to the Gitea commit and run. Official releases use the notes in `.github/release-notes/`. Gitea doesn't create tags of its own: on a pull mirror a tag made locally is deleted by the next sync. So a build started by hand, or from a branch, produces artifacts but no release.
-
-## Build
-
-Requirements: JDK 17+ and the Android SDK (API 35). The first build downloads the sherpa-onnx AAR (50 MB, checksum-verified) into `app/libs/`.
-
-```bash
-./gradlew :core:test            # unit tests for the AI/pipeline layer
-./gradlew :app:assembleDebug    # app/build/outputs/apk/debug/app-debug.apk
-```
-
-GitHub Actions builds the debug APK on every push and uploads it as an artifact.
-
-Minimum Android version: 8.0 (API 26).
+</details>
