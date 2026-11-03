@@ -33,9 +33,11 @@ jobs:
           path: app/libs
           key: sherpa-onnx-${{ hashFiles('app/build.gradle.kts') }}
 
-      # A stable signing key lets new builds install as updates over old ones. Prefer the
-      # KALISCRIBER_KEYSTORE_BASE64 / KALISCRIBER_KEYSTORE_PASSWORD secrets; without them a CI key is
-      # generated once and kept in the Actions cache.
+      # A stable signing key lets new builds install as updates over old ones. The key comes from the
+      # KALISCRIBER_KEYSTORE_BASE64 / KALISCRIBER_KEYSTORE_PASSWORD secrets. Without them a throwaway CI
+      # key is kept in the Actions cache so builds still work, but the cache can drop it at any time
+      # (it did once, and updates stopped installing), so releases need the secrets and every APK is
+      # checked against .github/signing-cert-sha256 before it is published.
       - name: Restore CI signing key
         uses: actions/cache@v4
         with:
@@ -46,8 +48,13 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KALISCRIBER_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KALISCRIBER_KEYSTORE_PASSWORD }}
+          PUBLISHING: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
         run: |
           mkdir -p ~/.kaliscriber
+          if [ -z "$KEYSTORE_BASE64" ] && [ "$PUBLISHING" = "true" ]; then
+            echo "::error::Releases must be signed with the permanent key: add the KALISCRIBER_KEYSTORE_BASE64 and KALISCRIBER_KEYSTORE_PASSWORD repository secrets."
+            exit 1
+          fi
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > ~/.kaliscriber/release.jks
             echo "KALISCRIBER_KEYSTORE=$HOME/.kaliscriber/release.jks" >> "$GITHUB_ENV"
@@ -79,6 +86,22 @@ jobs:
           ls -la release
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # Phones only install an update signed with the same key as the installed app.
+      - name: Check signing certificate
+        id: cert
+        run: |
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner"
+          EXPECTED=$(tr -d '[:space:]' < .github/signing-cert-sha256)
+          for f in release/*.apk; do
+            ACTUAL=$("$APKSIGNER" verify --print-certs "$f" | grep -m1 'certificate SHA-256 digest' | sed 's/.*digest: //')
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "::warning::$(basename "$f") is signed with $ACTUAL, not the release key $EXPECTED. It won't install as an update and won't be published."
+              echo "match=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "match=true" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v4
         with:
           name: kaliscriber-apks
@@ -86,7 +109,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cert.outputs.match == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
@@ -110,6 +133,10 @@ jobs:
             exit 1
           fi
           test -f ".github/release-notes/${TAG}.md"
+          if [ "${{ steps.cert.outputs.match }}" != "true" ]; then
+            echo "::error::The APKs aren't signed with the release key, so they wouldn't install as updates." >&2
+            exit 1
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Publish version release
