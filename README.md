@@ -41,6 +41,7 @@ An Android AI note taker, meeting transcriber and summariser that runs on **your
 - **AI usage & cost** (Settings): tokens used this month by model and, once you enter prices, the cost; each meeting's processing details list what its requests used.
 - **Storage** (Settings): what recordings, meetings, models and the search index take up, and *Keep recordings* (30 days to a year) to delete older recordings while keeping transcripts, summaries and notes. A meeting's menu can delete just its recording.
 - **Backup & restore** (Settings): meetings, transcripts, notes, saved voices and settings (optionally recordings) in one password-encrypted file (AES-256-GCM). API keys are never included. Restoring only adds what the phone doesn't have.
+- **Automatic backups** (Settings → Data & storage): the same encrypted backup made every day or week into a folder you choose (for example one synced with Google Drive or Nextcloud), keeping the newest few. Backups you make by hand are never deleted.
 
 **Speakers**
 - **Voice memory:** name a speaker once and the app recognises their voice in later meetings. Voiceprints are computed and stored only on the phone (Settings → Voice memory).
