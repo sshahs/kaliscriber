@@ -7,6 +7,7 @@ import com.kaliscriber.core.ai.llm.LlmRole
 import com.kaliscriber.core.ai.usage.TaggedLlm
 import com.kaliscriber.core.ai.usage.UsageTag
 import com.kaliscriber.core.model.ActionItem
+import com.kaliscriber.core.model.AgendaItem
 import com.kaliscriber.core.model.ChatMessage
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.ExcerptRef
@@ -160,7 +161,9 @@ class MeetingAi(
     suspend fun insights(meeting: Meeting, fromNotes: Boolean = false): MeetingInsights {
         requireTranscript(meeting)
         val format = SummaryFormats.of(meeting, settings().customFormats)
-        val obj = meetingJson(meeting, Prompts.insightsTask(format), insightsSource(meeting, fromNotes))
+        val agenda = Agenda.items(meeting.agenda)
+        val task = Prompts.insightsTask(format) + if (agenda.isEmpty()) "" else "\n" + Prompts.agendaTask(agenda)
+        val obj = meetingJson(meeting, task, insightsSource(meeting, fromNotes))
         val previous = meeting.insights?.actionItems.orEmpty()
         return MeetingInsights(
             title = obj.str("title").orEmpty(),
@@ -200,6 +203,11 @@ class MeetingAi(
             }.filter { it.items.isNotEmpty() },
             type = format.type,
             format = format.label,
+            agenda = if (agenda.isEmpty()) emptyList() else obj.list("agenda").mapNotNull { el ->
+                val a = el as? JsonObject ?: return@mapNotNull null
+                val item = a.str("item", "title", "name") ?: return@mapNotNull null
+                AgendaItem(item, a.bool("covered", "done") ?: false, a.str("notes", "summary", "note").orEmpty())
+            },
             generatedAt = clock.now(),
         )
     }

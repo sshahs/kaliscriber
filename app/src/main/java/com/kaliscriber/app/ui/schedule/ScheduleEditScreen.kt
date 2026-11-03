@@ -253,7 +253,7 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
             OutlinedTextField(
                 agenda, { agenda = it },
                 label = { Text("Agenda (optional)") },
-                placeholder = { Text("What the meeting is about; saved as a note with the recording") },
+                placeholder = { Text("One item per line; the notes will say which were covered") },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
             )
 

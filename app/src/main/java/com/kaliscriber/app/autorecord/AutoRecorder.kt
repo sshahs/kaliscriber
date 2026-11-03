@@ -29,7 +29,6 @@ import com.kaliscriber.core.calendar.ScheduledRecordings
 import com.kaliscriber.core.pipeline.MeetingPipeline
 import com.kaliscriber.core.store.JsonValueStore
 import com.kaliscriber.core.calendar.ScheduledRecording
-import com.kaliscriber.core.store.NoteRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -54,7 +53,6 @@ class AutoRecorder(
     private val calendar: CalendarService,
     private val recorder: RecordingManager,
     private val pipeline: MeetingPipeline,
-    private val notes: NoteRepository,
     private val settings: () -> AppSettings,
     private val visibility: AppVisibility,
     private val store: JsonValueStore<AutoRecord.State>,
@@ -220,9 +218,8 @@ class AutoRecorder(
                 schedule.type != null -> pipeline.setMeetingType(meetingId, schedule.type)
             }
             schedule.expectedSpeakers?.let { pipeline.setExpectedSpeakers(meetingId, it) }
-            if (schedule.agenda.isNotBlank()) {
-                notes.create(title = "Agenda: ${schedule.title.ifBlank { "Scheduled recording" }}", content = schedule.agenda.trim(), meetingId = meetingId)
-            }
+            // The notes then say which agenda items the meeting covered.
+            if (schedule.agenda.isNotBlank()) pipeline.setAgenda(meetingId, schedule.agenda)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

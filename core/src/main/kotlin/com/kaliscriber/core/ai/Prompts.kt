@@ -99,6 +99,15 @@ object Prompts {
         Use empty arrays when nothing applies.
     """.trimIndent()
 
+    /** Asks for each agenda item to be marked covered or not, added to the insights task. */
+    fun agendaTask(items: List<String>): String = buildString {
+        appendLine("The meeting had an agenda (see <agenda>). Also add \"agenda\" to the JSON object, one entry per agenda item in the same order:")
+        appendLine("[{\"item\": \"the agenda item as given\", \"covered\": true, \"notes\": \"what was said or decided about it, briefly\"}]")
+        appendLine("Set \"covered\" to false when the meeting didn't get to an item, and say so in \"notes\" (for example \"Not discussed\" or \"Postponed to next week\").")
+        appendLine("Write the summary following the agenda's order where the meeting did. Agenda items:")
+        items.forEach { appendLine("- $it") }
+    }.trimEnd()
+
     /** [INSIGHTS_TASK] for a kind of meeting: its focus, and the extra sections it needs. */
     fun insightsTask(type: MeetingType): String = insightsTask(SummaryFormats.of(type))
 
@@ -219,6 +228,14 @@ object Prompts {
         val unknown = meeting.speakers.filter { it.isPlaceholder }.map { it.name }
         if (known.isNotEmpty()) appendLine("Identified speakers: ${known.joinToString()}")
         if (unknown.isNotEmpty()) appendLine("Unidentified speakers (placeholder names): ${unknown.joinToString()}")
+        val agenda = Agenda.items(meeting.agenda)
+        if (agenda.isNotEmpty()) {
+            appendLine()
+            appendLine("<agenda>")
+            appendLine("What the meeting was meant to cover, as planned beforehand:")
+            agenda.forEach { appendLine("- $it") }
+            appendLine("</agenda>")
+        }
         appendLine()
         appendLine("<transcript>")
         appendLine(transcript)

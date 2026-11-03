@@ -72,6 +72,10 @@ fun JsonObject.list(vararg keys: String): List<JsonElement> {
     return emptyList()
 }
 
+/** A yes/no value, accepting true/false, "yes"/"no" and 1/0; null if absent. */
+fun JsonObject.bool(vararg keys: String): Boolean? =
+    str(*keys)?.lowercase()?.let { it == "true" || it == "yes" || it == "1" }
+
 fun JsonObject.strings(vararg keys: String): List<String> =
     list(*keys).mapNotNull { it.asText()?.trim()?.takeIf(String::isNotEmpty) }
 

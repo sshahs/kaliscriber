@@ -51,6 +51,14 @@ object TranscriptFormatter {
             if (insights.summary.isNotBlank()) {
                 appendLine("## Summary"); appendLine(insights.summary); appendLine()
             }
+            if (insights.agenda.isNotEmpty()) {
+                appendLine("## Agenda")
+                insights.agenda.forEach { a ->
+                    val notes = a.notes.takeIf { it.isNotBlank() }?.let { " — $it" }.orEmpty()
+                    appendLine("- [${if (a.covered) "x" else " "}] ${a.item}${if (a.covered) "" else " (not covered)"}$notes")
+                }
+                appendLine()
+            }
             insights.sections.forEach { section(it.title, it.items) }
             section("Key points", insights.keyPoints)
             section("Decisions", insights.decisions)

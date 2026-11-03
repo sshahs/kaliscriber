@@ -52,6 +52,8 @@ data class Meeting(
     val type: MeetingType? = null,
     /** Id of the user's own summary format, when they chose one (see [com.kaliscriber.core.ai.SummaryFormats]). */
     val formatId: String? = null,
+    /** What the meeting was meant to cover, one item per line; the notes say which items were covered. */
+    val agenda: String = "",
     /** When the recording was deleted to save space (the transcript and notes were kept). */
     val audioDeletedAt: Long? = null,
     /**
@@ -218,11 +220,17 @@ data class MeetingInsights(
     val type: MeetingType? = null,
     /** The name of the format the notes were written in. */
     val format: String = "",
+    /** Each agenda item and whether the meeting covered it, in the agenda's order. */
+    val agenda: List<AgendaItem> = emptyList(),
     val generatedAt: Long = 0,
 )
 
 @Serializable
 data class InsightSection(val title: String, val items: List<String>)
+
+/** One agenda item: whether the meeting got to it, and what was said or decided about it. */
+@Serializable
+data class AgendaItem(val item: String, val covered: Boolean, val notes: String = "")
 
 @Serializable
 data class Highlight(

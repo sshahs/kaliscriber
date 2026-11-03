@@ -224,6 +224,18 @@ fun SummaryTab(
 ) {
     val insights = meeting.insights
     val customFormats by vm.customFormats.collectAsStateWithLifecycle()
+    var editingAgenda by rememberSaveable { mutableStateOf(false) }
+    if (editingAgenda) {
+        AgendaDialog(
+            initial = meeting.agenda,
+            hasNotes = meeting.insights != null,
+            onDismiss = { editingAgenda = false },
+            onSave = {
+                editingAgenda = false
+                vm.setAgenda(it)
+            },
+        )
+    }
     val since by vm.sinceLast.collectAsStateWithLifecycle()
     val talk = remember(meeting.segments, meeting.speakers) { TalkStats.of(meeting) }
     if (insights == null) {
@@ -249,6 +261,10 @@ fun SummaryTab(
         }
         since?.let { last ->
             add(SummaryPart("since", "Since last time") { SinceLastCard(last, onOpenMeeting) })
+        }
+        if (meeting.agenda.isNotBlank() || insights.agenda.isNotEmpty()) {
+            val chip = insights.agenda.takeIf { it.isNotEmpty() }?.let { a -> "Agenda ${a.count { it.covered }}/${a.size}" } ?: "Agenda"
+            add(SummaryPart("agenda", chip) { AgendaCard(meeting, onEdit = { editingAgenda = true }) })
         }
         if (insights.actionItems.isNotEmpty()) {
             val open = insights.actionItems.count { !it.done }
@@ -376,6 +392,10 @@ fun SummaryTab(
                     onPickCustom = vm::setCustomFormat,
                     onMakeOwn = onOpenFormats,
                 )
+                if (meeting.agenda.isBlank()) {
+                    Spacer(Modifier.width(8.dp))
+                    AssistChip(onClick = { editingAgenda = true }, enabled = Busy.INSIGHTS !in busy, label = { Text("Add agenda") })
+                }
                 if (Busy.INSIGHTS in busy) {
                     Spacer(Modifier.width(12.dp))
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)

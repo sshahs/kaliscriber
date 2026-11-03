@@ -135,6 +135,12 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         pipeline.generateInsights(meetingId)
     }
 
+    /** Sets what the meeting was meant to cover and, if it has notes, writes them again against it. */
+    fun setAgenda(agenda: String) = launchTask(Busy.INSIGHTS, background = true) {
+        pipeline.setAgenda(meetingId, agenda)
+        if (meeting.value?.insights != null && meeting.value?.segments?.isNotEmpty() == true) pipeline.generateInsights(meetingId)
+    }
+
     /** The user's own summary formats, offered next to the built-in ones. */
     val customFormats: StateFlow<List<CustomFormat>> = container.settingsStore.value
         .map { it.customFormats }

@@ -777,6 +777,11 @@ class MeetingPipeline(
         repo.update(meetingId) { it.copy(type = type, formatId = null) }
     }
 
+    /** Sets what the meeting was meant to cover, one item per line. */
+    suspend fun setAgenda(meetingId: String, agenda: String) {
+        repo.update(meetingId) { it.copy(agenda = agenda.trim()) }
+    }
+
     /** Sets one of the user's own summary formats for the meeting. */
     suspend fun setCustomFormat(meetingId: String, formatId: String) {
         repo.update(meetingId) { it.copy(type = null, formatId = formatId) }
