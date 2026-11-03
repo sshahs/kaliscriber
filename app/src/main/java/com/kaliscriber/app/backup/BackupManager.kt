@@ -9,6 +9,14 @@ import com.kaliscriber.app.recording.RecordingManager
 import com.kaliscriber.app.recording.RecordingState
 import com.kaliscriber.core.backup.BackupException
 import com.kaliscriber.core.backup.LibraryBackup
+import com.kaliscriber.core.backup.AutoBackups
+import com.kaliscriber.core.backup.AutoBackupStatus
+import com.kaliscriber.core.ai.AppSettings
+import com.kaliscriber.core.store.JsonValueStore
+import com.kaliscriber.app.data.ExportSecret
+import com.kaliscriber.app.data.SecretStore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +40,9 @@ class BackupManager(
     private val recorder: RecordingManager,
     private val jobs: MeetingJobs,
     private val scope: CoroutineScope,
+    private val settings: () -> AppSettings,
+    private val secrets: SecretStore,
+    private val autoStatus: JsonValueStore<AutoBackupStatus>,
 ) {
     sealed interface State {
         data object Idle : State
@@ -76,6 +87,69 @@ class BackupManager(
             if (result.meetingsKept > 0) append(" ${count(result.meetingsKept, "meeting")} already on this phone ${if (result.meetingsKept == 1) "was" else "were"} kept as they are.")
             if (result.settingsRestored) append(" Settings were restored; enter your API keys again in Settings.")
         }
+    }
+
+    /** How the latest automatic backup went. */
+    val auto: StateFlow<AutoBackupStatus> = autoStatus.value
+    private val autoLock = Mutex()
+
+    /** Raised when a backup can't be made right now (a meeting is being recorded); try again later. */
+    class BusyException : Exception("A meeting is being recorded")
+
+    /**
+     * Writes an automatic backup into the chosen folder and deletes the oldest automatic ones
+     * beyond the number to keep (never a backup the user made by hand). Returns the file's name.
+     */
+    suspend fun autoBackUp(): String = autoLock.withLock {
+        if (recorder.state.value is RecordingState.Recording) throw BusyException()
+        val s = settings()
+        val password = secrets.secret(ExportSecret.BACKUP_PASSWORD)?.toCharArray()
+        try {
+            if (s.backupFolder.isBlank()) throw IOException("Choose a folder for automatic backups.")
+            if (password == null || password.isEmpty()) throw IOException("Set a password for automatic backups.")
+            val name = withContext(Dispatchers.IO) { writeInto(Uri.parse(s.backupFolder), password, s.backupRecordings, s.backupKeep) }
+            autoStatus.update { it.copy(lastAt = System.currentTimeMillis(), lastFile = name, lastError = null) }
+            name
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: BusyException) {
+            throw e
+        } catch (e: Exception) {
+            val message = if (e is SecurityException) "KaliScriber can no longer write to the backup folder. Choose it again." else e.message ?: e.javaClass.simpleName
+            autoStatus.update { it.copy(lastError = message, lastErrorAt = System.currentTimeMillis()) }
+            throw IOException(message, e)
+        } finally {
+            password?.fill('\u0000')
+        }
+    }
+
+    private suspend fun writeInto(tree: Uri, password: CharArray, withRecordings: Boolean, keep: Int): String {
+        val resolver = context.contentResolver
+        val folderId = DocumentsContract.getTreeDocumentId(tree)
+        val folder = DocumentsContract.buildDocumentUriUsingTree(tree, folderId)
+        val name = AutoBackups.fileName(System.currentTimeMillis())
+        val doc = DocumentsContract.createDocument(resolver, folder, "application/octet-stream", name)
+            ?: throw IOException("Couldn't create the backup file in the folder.")
+        try {
+            val out = resolver.openOutputStream(doc, "wt") ?: throw IOException("Couldn't open the backup file to write.")
+            out.buffered(256 * 1024).use { stream -> backup.write(stream, password, withRecordings) { } }
+        } catch (e: Throwable) {
+            runCatching { DocumentsContract.deleteDocument(resolver, doc) }
+            throw e
+        }
+        // Only now that the new one is complete, tidy away the oldest.
+        val children = HashMap<String, String>()
+        resolver.query(
+            DocumentsContract.buildChildDocumentsUriUsingTree(tree, folderId),
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null,
+        )?.use { c -> while (c.moveToNext()) children[c.getString(1) ?: continue] = c.getString(0) ?: continue }
+        for (old in AutoBackups.toDelete(children.keys.toList(), keep)) {
+            val id = children[old] ?: continue
+            runCatching { DocumentsContract.deleteDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(tree, id)) }
+                .onFailure { Log.w("KaliScriber", "Couldn't delete the old backup $old", it) }
+        }
+        return name
     }
 
     fun dismiss() {

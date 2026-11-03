@@ -229,7 +229,8 @@ class AppContainer(context: Context) {
         BackupManager(
             appContext,
             LibraryBackup(meetings, notes, settingsStore, voiceStore, askAllStore, usageStore, appVersion = version),
-            recorder, jobs, scope,
+            recorder, jobs, scope, settings, secrets,
+            JsonValueStore(File(filesDir, "auto-backup.json"), com.kaliscriber.core.backup.AutoBackupStatus.serializer(), com.kaliscriber.core.backup.AutoBackupStatus()),
         )
     }
 
@@ -280,6 +281,13 @@ class AppContainer(context: Context) {
                 }
                 before = list.associate { it.id to it.status }
             }
+        }
+        // Automatic backups: the daily check is on while they are set up.
+        scope.launch {
+            settingsStore.value
+                .map { it.backupEvery to it.backupFolder.isNotBlank() }
+                .distinctUntilChanged()
+                .collect { runCatching { com.kaliscriber.app.backup.AutoBackupScheduler.apply(appContext, settings()) } }
         }
         scope.launch {
             settingsStore.value

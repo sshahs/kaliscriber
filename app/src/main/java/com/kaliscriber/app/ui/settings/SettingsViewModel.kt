@@ -226,6 +226,35 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun dismissBackup() = container.backups.dismiss()
 
+    // --- Automatic backups -------------------------------------------------------------------------
+
+    val autoBackupStatus = container.backups.auto
+
+    fun setBackupPassword(password: CharArray) {
+        try {
+            container.secrets.setSecret(ExportSecret.BACKUP_PASSWORD, String(password))
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
+    /** Backs up into [uri], a folder picked with the system's folder chooser, from now on. */
+    fun chooseBackupFolder(uri: Uri) {
+        val resolver = container.appContext.contentResolver
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { resolver.takePersistableUriPermission(uri, flags) }
+        val old = settings.value.backupFolder
+        // The Markdown folder may be the same one; keep its permission.
+        if (old.isNotBlank() && old != uri.toString() && old != settings.value.export.markdownFolder) {
+            runCatching { resolver.releasePersistableUriPermission(Uri.parse(old), flags) }
+        }
+        update { it.copy(backupFolder = uri.toString()) }
+    }
+
+    fun backUpAutomaticallyNow() {
+        container.scope.launch { runCatching { container.backups.autoBackUp() } }
+    }
+
     /** True while this phone's settings are still the defaults, so a backup's settings lose nothing. */
     fun settingsUntouched(): Boolean = settings.value == AppSettings()
 
@@ -293,7 +322,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         runCatching { resolver.takePersistableUriPermission(uri, flags) }
         val old = settings.value.export.markdownFolder
         container.scope.launch {
-            if (old.isNotBlank() && old != uri.toString()) runCatching { resolver.releasePersistableUriPermission(Uri.parse(old), flags) }
+            if (old.isNotBlank() && old != uri.toString() && old != settings.value.backupFolder) runCatching { resolver.releasePersistableUriPermission(Uri.parse(old), flags) }
             container.markdownSync.reset()
             container.settingsStore.update { it.copy(export = it.export.copy(markdownFolder = uri.toString())) }
             container.markdownSync.sync()
@@ -307,7 +336,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             container.settingsStore.update { it.copy(export = it.export.copy(markdownFolder = "")) }
             container.markdownSync.reset()
             val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            if (old.isNotBlank()) runCatching { container.appContext.contentResolver.releasePersistableUriPermission(Uri.parse(old), flags) }
+            // Automatic backups may use the same folder; keep its permission then.
+            if (old.isNotBlank() && old != settings.value.backupFolder) runCatching { container.appContext.contentResolver.releasePersistableUriPermission(Uri.parse(old), flags) }
         }
     }
 

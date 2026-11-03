@@ -24,6 +24,8 @@ enum class ExportSecret(val key: String) {
     NOTION_TOKEN("export.notion.token"),
     AFFINE_TOKEN("export.affine.token"),
     CALDAV_PASSWORD("export.caldav.password"),
+    /** The password automatic backups are encrypted with. */
+    BACKUP_PASSWORD("backup.password"),
 }
 
 class SecretStore(context: Context) : SecretProvider {

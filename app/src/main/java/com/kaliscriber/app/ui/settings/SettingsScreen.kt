@@ -131,7 +131,7 @@ enum class SettingsPage(val title: String, val summary: String, val keywords: Li
         listOf("email", "Google Docs", "Drive", "Notion", "AFFiNE", "Baikal", "CalDAV", "calendar", "tasks", "Markdown", "Obsidian", "folder", "sync", "vault"),
     ),
     APPEARANCE("Appearance", "Light or dark, and wallpaper colours", listOf("theme", "dark mode", "light mode", "night", "colours", "colors", "Material You", "wallpaper")),
-    DATA("Data & storage", "Space used, keeping recordings, backup and restore", listOf("storage", "space", "delete recordings", "keep recordings", "backup", "restore", "password")),
+    DATA("Data & storage", "Space used, keeping recordings, backup and restore", listOf("storage", "space", "delete recordings", "keep recordings", "backup", "restore", "password", "automatic backup", "daily backup", "Google Drive", "Nextcloud")),
     ;
 
     /** What on this page matches [query], or null if nothing does. */
@@ -267,6 +267,7 @@ fun SettingsScreen(onBack: () -> Unit, initialPage: SettingsPage? = null) {
                 SettingsPage.DATA -> {
                     item { StorageSection(settings, vm) }
                     item { BackupSection(vm) }
+                    item { AutoBackupSection(settings, vm) }
                 }
             }
         }

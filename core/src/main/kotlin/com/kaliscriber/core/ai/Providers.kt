@@ -232,6 +232,14 @@ data class AppSettings(
     val scheduledRecordings: List<com.kaliscriber.core.calendar.ScheduledRecording> = emptyList(),
     /** Nothing is recorded by itself (scheduled or from the calendar) up to the end of this day (ISO date). */
     val recordingPausedUntil: String? = null,
+    /** Encrypted backups made by themselves into [backupFolder]. */
+    val backupEvery: com.kaliscriber.core.backup.BackupEvery = com.kaliscriber.core.backup.BackupEvery.OFF,
+    /** The folder (a document tree URI) automatic backups go to; blank for none chosen. */
+    val backupFolder: String = "",
+    /** How many automatic backups to keep; older ones are deleted. */
+    val backupKeep: Int = 5,
+    /** Put recordings in automatic backups too (much larger). */
+    val backupRecordings: Boolean = false,
     /** Colours taken from the wallpaper (Android 12 and later) instead of the app's own. */
     val dynamicColor: Boolean = true,
 ) {

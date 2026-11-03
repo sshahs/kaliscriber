@@ -213,7 +213,7 @@ private fun Outcome(message: String, error: Boolean, onDismiss: () -> Unit) {
  * backup's settings (checked to start with if it is true).
  */
 @Composable
-private fun PasswordDialog(
+internal fun PasswordDialog(
     title: String,
     body: String,
     confirmLabel: String,
