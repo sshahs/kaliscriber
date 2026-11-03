@@ -113,6 +113,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
+          # Without this the tag goes on whatever the branch points at when the release is made,
+          # which is a later commit when several were pushed close together.
+          target_commitish: ${{ github.sha }}
           name: KaliScriber ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
           prerelease: true
           files: release/*.apk

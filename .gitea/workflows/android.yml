@@ -5,10 +5,12 @@
 name: Android CI (Gitea)
 
 on:
-  # A mirror sync delivers new commits and new tags as pushes.
+  # A mirror sync delivers new commits and new tags as pushes. Every synced commit is built from
+  # its branch push; of the tags only v<version> (an official release) is built, since GitHub's
+  # build-<N> tags mark commits that are built here already.
   push:
     branches: ['**']
-    tags: ['v*', 'build-*']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -67,15 +69,11 @@ jobs:
       - name: Build APKs
         run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
 
-      # build-N tags come from the GitHub build with that run number, so the files are named alike.
       - name: Name the release APKs
         id: apk
         run: |
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          case "$GITHUB_REF" in
-            refs/tags/build-*) BUILD="${GITHUB_REF_NAME#build-}" ;;
-            *) BUILD="${GITHUB_RUN_NUMBER}" ;;
-          esac
+          BUILD="${GITHUB_RUN_NUMBER}"
           mkdir -p release
           for f in app/build/outputs/apk/release/app-*-release.apk; do
             abi=$(basename "$f" | sed -E 's/^app-(.*)-release\.apk$/\1/')
@@ -107,9 +105,9 @@ jobs:
           path: release/*.apk
           if-no-files-found: error
 
-      # Releases go on tags that come from GitHub through the mirror: v<version> for official
-      # releases, build-<N> for each build. A tag made on a pull mirror is deleted by its next
-      # sync, so this never creates one; the release is attached to the mirrored tag instead.
+      # Releases go on the v<version> tags that come from GitHub through the mirror. A tag made on a
+      # pull mirror is deleted by its next sync, so this never creates one; the release is attached
+      # to the mirrored tag instead.
       - name: Publish Gitea release
         if: startsWith(github.ref, 'refs/tags/') && steps.cert.outputs.match == 'true'
         env:
