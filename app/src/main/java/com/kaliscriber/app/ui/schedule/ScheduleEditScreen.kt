@@ -137,6 +137,7 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
     var remind by remember { mutableStateOf(initial.remindMinutes) }
     var agenda by remember { mutableStateOf(initial.agenda) }
     var enabled by remember { mutableStateOf(initial.enabled) }
+    var until by remember { mutableStateOf(initial.untilDate) }
     var picking by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -147,6 +148,7 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
     val endMs = end.atZone(zone).toInstant().toEpochMilli()
     val past = repeat == Repeat.NONE && endMs <= System.currentTimeMillis()
     val noDays = repeat == Repeat.CUSTOM && days.isEmpty()
+    val endsBeforeStart = repeat != Repeat.NONE && until?.isBefore(date) == true
     val timeFormat = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 
     val askPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { onBack() }
@@ -155,6 +157,7 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
         days = if (repeat == Repeat.CUSTOM) days.sorted() else emptyList(),
         type = type, formatId = formatId, expectedSpeakers = people, remindMinutes = remind,
         agenda = agenda.trim(), enabled = enabled,
+        until = if (repeat == Repeat.NONE) null else until?.toString(),
     )
     fun save() = vm.save(built()) {
         // Recording later needs the microphone, and reminders need notifications.
@@ -170,7 +173,7 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text(if (vm.isNew) "Schedule a recording" else "Edit schedule") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-                actions = { TextButton(onClick = { save() }, enabled = !past && !noDays) { Text("Save") } },
+                actions = { TextButton(onClick = { save() }, enabled = !past && !noDays && !endsBeforeStart) { Text("Save") } },
             )
         },
     ) { padding ->
@@ -231,6 +234,18 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
                 }
                 if (noDays) Text("Choose at least one day.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
+            if (repeat != Repeat.NONE) {
+                Label("Ends")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected = until == null, onClick = { until = null }, label = { Text("Never") })
+                    FilterChip(
+                        selected = until != null,
+                        onClick = { picking = "until" },
+                        label = { Text(until?.let { "After ${it.format(DateTimeFormatter.ofPattern("EEE d MMM yyyy"))}" } ?: "On a date…") },
+                    )
+                }
+                if (endsBeforeStart) Text("The end date is before the first day.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
 
             HorizontalDivider()
             Label("Notes format")
@@ -285,6 +300,26 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
     }
 
     when (picking) {
+        "until" -> {
+            val first = date
+            val state = rememberDatePickerState(
+                initialSelectedDateMillis = (until ?: first.plusMonths(1)).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+                selectableDates = object : SelectableDates {
+                    override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                        !Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneOffset.UTC).toLocalDate().isBefore(first)
+                },
+            )
+            DatePickerDialog(
+                onDismissRequest = { picking = null },
+                confirmButton = {
+                    TextButton(onClick = {
+                        state.selectedDateMillis?.let { until = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
+                        picking = null
+                    }) { Text("OK") }
+                },
+                dismissButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
+            ) { DatePicker(state, title = { Text("Last day it records", modifier = Modifier.padding(start = 24.dp, top = 16.dp)) }) }
+        }
         "date" -> {
             val today = LocalDate.now()
             val state = rememberDatePickerState(

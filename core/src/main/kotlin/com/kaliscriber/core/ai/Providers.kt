@@ -230,6 +230,8 @@ data class AppSettings(
     val phoneCalendar: Boolean = false,
     /** Recordings the user scheduled in the app, recorded at their times whether or not auto-record is on. */
     val scheduledRecordings: List<com.kaliscriber.core.calendar.ScheduledRecording> = emptyList(),
+    /** Nothing is recorded by itself (scheduled or from the calendar) up to the end of this day (ISO date). */
+    val recordingPausedUntil: String? = null,
     /** Colours taken from the wallpaper (Android 12 and later) instead of the app's own. */
     val dynamicColor: Boolean = true,
 ) {

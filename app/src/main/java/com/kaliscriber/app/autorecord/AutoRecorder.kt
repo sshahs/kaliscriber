@@ -148,7 +148,9 @@ class AutoRecorder(
      */
     private fun allEvents(st: AutoRecord.State, now: Long): List<CalendarEvent> {
         val scheduled = ScheduledRecordings.occurrences(settings().scheduledRecordings, now - 12 * HOUR_MS, now + 8 * 24 * HOUR_MS)
-        return st.events + scheduled
+        // Paused for a while (a holiday, say): nothing on those days is recorded by itself.
+        val pausedUntil = settings().recordingPausedUntil
+        return (st.events + scheduled).filterNot { ScheduledRecordings.paused(it, pausedUntil) }
     }
 
     private fun recorderState(st: AutoRecord.State): AutoRecord.Recorder {

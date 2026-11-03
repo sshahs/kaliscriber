@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.EventBusy
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
@@ -65,6 +66,7 @@ import com.kaliscriber.core.calendar.AutoRecord
 import com.kaliscriber.core.calendar.CalendarEvent
 import com.kaliscriber.core.calendar.ScheduledRecording
 import com.kaliscriber.core.calendar.ScheduledRecordings
+import com.kaliscriber.core.util.Ids
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -84,6 +86,8 @@ class ScheduleViewModel(private val container: AppContainer) : ViewModel() {
         val skipped: Boolean,
         val recordingNow: Boolean,
         val format: String?,
+        /** On a day recording is paused. */
+        val paused: Boolean = false,
     ) {
         val key: String get() = AutoRecord.key(event)
     }
@@ -95,6 +99,8 @@ class ScheduleViewModel(private val container: AppContainer) : ViewModel() {
         val days: List<Pair<String, List<Upcoming>>> = emptyList(),
         val schedules: List<Entry> = emptyList(),
         val calendarOn: Boolean = false,
+        /** Nothing is recorded by itself up to the end of this day. */
+        val pausedUntil: LocalDate? = null,
     )
 
     val state: StateFlow<State> = combine(container.settingsStore.value, container.autoRecorder.state, container.recorder.state) { settings, auto, recording ->
@@ -111,13 +117,16 @@ class ScheduleViewModel(private val container: AppContainer) : ViewModel() {
             .filter { it.end > now && AutoRecord.wanted(it, settings.autoRecordWhich, auto.copy(skipped = emptyMap())) }
             .map { e -> Upcoming(e, null, AutoRecord.key(e) in auto.skipped, AutoRecord.key(e) == activeKey, null) }
         val today = LocalDate.now(zone)
-        val days = (scheduled + calendar).sortedBy { it.event.start }
+        val pausedUntil = settings.recordingPausedUntil?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.takeIf { !it.isBefore(today) }
+        val days = (scheduled + calendar)
+            .map { it.copy(paused = ScheduledRecordings.paused(it.event, settings.recordingPausedUntil, zone)) }
+            .sortedBy { it.event.start }
             .groupBy { Instant.ofEpochMilli(it.event.start).atZone(zone).toLocalDate() }
             .map { (day, list) -> dayLabel(day, today) to list }
         val schedules = ScheduledRecordings.pruned(settings.scheduledRecordings, now).map { s ->
             Entry(s, ScheduledRecordings.next(s, now, zone), ScheduledRecordings.repeatLabel(s, zone), ScheduledRecordings.formatLabel(s, custom))
         }.sortedWith(compareBy<Entry> { !it.schedule.enabled }.thenBy { it.next?.start ?: Long.MAX_VALUE })
-        State(days, schedules, settings.autoRecord)
+        State(days, schedules, settings.autoRecord, pausedUntil)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), State())
 
     fun toggleSkip(item: Upcoming) {
@@ -134,6 +143,18 @@ class ScheduleViewModel(private val container: AppContainer) : ViewModel() {
 
     fun delete(id: String) = viewModelScope.launch {
         container.settingsStore.update { s -> s.copy(scheduledRecordings = s.scheduledRecordings.filterNot { it.id == id }) }
+    }
+
+    /** Records nothing by itself up to the end of [day]; null resumes. */
+    fun pauseUntil(day: LocalDate?) = viewModelScope.launch {
+        container.settingsStore.update { it.copy(recordingPausedUntil = day?.toString()) }
+    }
+
+    /** Saves a copy of [schedule] and hands its id to [then], to edit it. */
+    fun duplicate(schedule: ScheduledRecording, then: (String) -> Unit) = viewModelScope.launch {
+        val copy = ScheduledRecordings.duplicate(schedule, Ids.new())
+        container.settingsStore.update { s -> s.copy(scheduledRecordings = s.scheduledRecordings + copy) }
+        then(copy.id)
     }
 
     fun overlayAllowed() = container.autoRecorder.overlayAllowed()
@@ -170,6 +191,7 @@ fun ScheduleTab(
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var deleting by remember { mutableStateOf<ScheduledRecording?>(null) }
+    var pickingPause by remember { mutableStateOf(false) }
     var resumed by remember { mutableIntStateOf(0) }
     LifecycleResumeEffect(Unit) {
         resumed++
@@ -212,6 +234,10 @@ fun ScheduleTab(
                     }
                 }
             }
+        }
+
+        item(key = "pause") {
+            PauseCard(state.pausedUntil, onPause = { pickingPause = true }, onResume = { vm.pauseUntil(null) })
         }
 
         item(key = "coming-up") { Heading("Coming up") }
@@ -266,8 +292,16 @@ fun ScheduleTab(
                 onEdit = { onEdit(entry.schedule.id) },
                 onToggle = { vm.setEnabled(entry.schedule.id, it) },
                 onDelete = { deleting = entry.schedule },
+                onDuplicate = { vm.duplicate(entry.schedule) { id -> onEdit(id) } },
             )
         }
+    }
+
+    if (pickingPause) {
+        PauseUntilDialog(onDismiss = { pickingPause = false }, onPick = { day ->
+            pickingPause = false
+            vm.pauseUntil(day)
+        })
     }
 
     deleting?.let { s ->
@@ -325,7 +359,7 @@ private fun UpcomingRow(item: ScheduleViewModel.Upcoming, onSkip: () -> Unit, on
                 Text(
                     item.event.title,
                     style = MaterialTheme.typography.titleSmall,
-                    textDecoration = if (item.skipped) TextDecoration.LineThrough else null,
+                    textDecoration = if (item.skipped || item.paused) TextDecoration.LineThrough else null,
                 )
                 val details = listOfNotNull(
                     "${time(item.event.start)}–${time(item.event.end)}",
@@ -333,10 +367,11 @@ private fun UpcomingRow(item: ScheduleViewModel.Upcoming, onSkip: () -> Unit, on
                     item.format,
                     "recording now".takeIf { item.recordingNow },
                     "won't record".takeIf { item.skipped },
+                    "paused".takeIf { item.paused && !item.skipped },
                 ).joinToString(" · ")
                 Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (!item.recordingNow) {
+            if (!item.recordingNow && !item.paused) {
                 TextButton(onClick = onSkip) { Text(if (item.skipped) "Record" else "Skip") }
             }
         }
@@ -344,7 +379,13 @@ private fun UpcomingRow(item: ScheduleViewModel.Upcoming, onSkip: () -> Unit, on
 }
 
 @Composable
-private fun ScheduleCard(entry: ScheduleViewModel.Entry, onEdit: () -> Unit, onToggle: (Boolean) -> Unit, onDelete: () -> Unit) {
+private fun ScheduleCard(
+    entry: ScheduleViewModel.Entry,
+    onEdit: () -> Unit,
+    onToggle: (Boolean) -> Unit,
+    onDelete: () -> Unit,
+    onDuplicate: () -> Unit,
+) {
     val s = entry.schedule
     Card(Modifier.fillMaxWidth().clickable(onClickLabel = "Edit", onClick = onEdit)) {
         Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -368,7 +409,15 @@ private fun ScheduleCard(entry: ScheduleViewModel.Entry, onEdit: () -> Unit, onT
                         Text(entry.repeat, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                TextButton(onClick = onDelete, contentPadding = PaddingValues(0.dp)) { Text("Delete") }
+                val until = s.untilDate?.takeIf { s.repeat != ScheduledRecording.Repeat.NONE }
+                if (until != null) {
+                    Text("Until ${until.format(DateTimeFormatter.ofPattern("EEE d MMM yyyy"))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Row {
+                    TextButton(onClick = onDuplicate, contentPadding = PaddingValues(0.dp)) { Text("Duplicate") }
+                    Spacer(Modifier.width(16.dp))
+                    TextButton(onClick = onDelete, contentPadding = PaddingValues(0.dp)) { Text("Delete") }
+                }
             }
             Switch(
                 checked = s.enabled,
@@ -376,5 +425,55 @@ private fun ScheduleCard(entry: ScheduleViewModel.Entry, onEdit: () -> Unit, onT
                 modifier = Modifier.semantics { contentDescription = "Record ${s.title.ifBlank { "this schedule" }}" },
             )
         }
+    }
+}
+
+/** Pausing everything that records by itself for a while, such as a holiday. */
+@Composable
+private fun PauseCard(pausedUntil: LocalDate?, onPause: () -> Unit, onResume: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (pausedUntil != null) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.PauseCircle, null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                if (pausedUntil != null) {
+                    Text("Paused until ${pausedUntil.format(DateTimeFormatter.ofPattern("EEEE d MMMM"))}", style = MaterialTheme.typography.titleSmall)
+                    Text("Nothing is recorded by itself until then.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text("Away for a while?", style = MaterialTheme.typography.titleSmall)
+                    Text("Pause scheduled and calendar recordings up to a date.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (pausedUntil != null) TextButton(onClick = onResume) { Text("Resume") } else TextButton(onClick = onPause) { Text("Pause") }
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PauseUntilDialog(onDismiss: () -> Unit, onPick: (LocalDate) -> Unit) {
+    val today = LocalDate.now()
+    val state = androidx.compose.material3.rememberDatePickerState(
+        initialSelectedDateMillis = today.plusDays(7).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli(),
+        selectableDates = object : androidx.compose.material3.SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                !Instant.ofEpochMilli(utcTimeMillis).atZone(java.time.ZoneOffset.UTC).toLocalDate().isBefore(today)
+        },
+    )
+    androidx.compose.material3.DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                state.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(java.time.ZoneOffset.UTC).toLocalDate()) } ?: onDismiss()
+            }) { Text("Pause") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) {
+        androidx.compose.material3.DatePicker(state, title = { Text("Pause until the end of", modifier = Modifier.padding(start = 24.dp, top = 16.dp)) })
     }
 }

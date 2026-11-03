@@ -32,7 +32,12 @@ data class ScheduledRecording(
     val agenda: String = "",
     /** Paused schedules are kept but don't record. */
     val enabled: Boolean = true,
+    /** For repeating schedules: the last day (ISO date, inclusive) it records on; null for no end. */
+    val until: String? = null,
 ) {
+    /** [until] as a date, ignoring a malformed value. */
+    val untilDate: LocalDate? get() = until?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
     @Serializable
     enum class Repeat(val label: String) {
         NONE("Once"),
@@ -74,7 +79,8 @@ object ScheduledRecordings {
                 }
             }
         }
-        return starts.filter { it + length > from && it < to }.map { start ->
+        val last = s.untilDate.takeIf { s.repeat != ScheduledRecording.Repeat.NONE }
+        return starts.filter { it + length > from && it < to && (last == null || !date(it, zone).isAfter(last)) }.map { start ->
             CalendarEvent(uid = UID_PREFIX + s.id, title = s.title.ifBlank { "Scheduled recording" }, start = start, end = start + length)
         }
     }
@@ -87,9 +93,24 @@ object ScheduledRecordings {
     fun reminderAt(event: CalendarEvent, list: List<ScheduledRecording>): Long? =
         scheduleFor(event, list)?.remindMinutes?.takeIf { it > 0 }?.let { event.start - it * 60_000L }
 
-    /** One-offs that ended over a day ago are dropped. */
-    fun pruned(list: List<ScheduledRecording>, now: Long): List<ScheduledRecording> =
-        list.filter { it.repeat != ScheduledRecording.Repeat.NONE || it.end > now - DAY_MS }
+    /** One-offs that ended over a day ago are dropped, and so are repeats whose last day has passed. */
+    fun pruned(list: List<ScheduledRecording>, now: Long, zone: ZoneId = ZoneId.systemDefault()): List<ScheduledRecording> =
+        list.filter { s ->
+            when {
+                s.repeat == ScheduledRecording.Repeat.NONE -> s.end > now - DAY_MS
+                else -> s.untilDate?.let { !it.isBefore(date(now - DAY_MS, zone)) } ?: true
+            }
+        }
+
+    /** True while recording by itself is paused (until the end of [pausedUntil], an ISO date) for [event]'s day. */
+    fun paused(event: CalendarEvent, pausedUntil: String?, zone: ZoneId = ZoneId.systemDefault()): Boolean {
+        val last = pausedUntil?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return false
+        return !date(event.start, zone).isAfter(last)
+    }
+
+    /** A copy of [s] to change, with a new id. */
+    fun duplicate(s: ScheduledRecording, newId: String): ScheduledRecording =
+        s.copy(id = newId, title = if (s.title.isBlank()) "" else "${s.title} (copy)")
 
     /** "Every Monday", "Mon, Wed and Fri", "Every weekday"…; empty for a one-off. */
     fun repeatLabel(s: ScheduledRecording, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String {

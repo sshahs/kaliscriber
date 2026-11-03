@@ -80,4 +80,26 @@ class ScheduledRecordingTest {
         assertEquals("1:1", ScheduledRecordings.formatLabel(base.copy(type = com.kaliscriber.core.ai.MeetingType.ONE_ON_ONE), mine))
         assertNull(ScheduledRecordings.formatLabel(base, mine))
     }
+
+    @Test
+    fun `repeats can end, recording can be paused for a while and schedules duplicated`() {
+        // Every weekday from Wednesday 14 Oct 2026 until Friday 16 Oct.
+        val s = ScheduledRecording("w", "Stand-up", at("2026-10-14T09:00"), at("2026-10-14T09:15"), Repeat.WEEKDAYS, until = "2026-10-16")
+        val days = ScheduledRecordings.occurrences(listOf(s), at("2026-10-14T00:00"), at("2026-10-24T00:00"), zone)
+            .map { java.time.Instant.ofEpochMilli(it.start).atZone(zone).toLocalDate().toString() }
+        assertEquals(listOf("2026-10-14", "2026-10-15", "2026-10-16"), days)
+        // Kept until its last day is over, then dropped.
+        assertEquals(1, ScheduledRecordings.pruned(listOf(s), at("2026-10-16T20:00"), zone).size)
+        assertEquals(0, ScheduledRecordings.pruned(listOf(s), at("2026-10-18T09:00"), zone).size)
+
+        val thursday = ScheduledRecordings.occurrences(listOf(s), at("2026-10-15T00:00"), at("2026-10-16T00:00"), zone).single()
+        assertTrue(ScheduledRecordings.paused(thursday, "2026-10-15", zone), "paused to the end of the day")
+        assertTrue(!ScheduledRecordings.paused(thursday, "2026-10-14", zone))
+        assertTrue(!ScheduledRecordings.paused(thursday, null, zone))
+
+        val copy = ScheduledRecordings.duplicate(s, "w2")
+        assertEquals("w2", copy.id)
+        assertEquals("Stand-up (copy)", copy.title)
+        assertEquals(s.copy(id = "w2", title = "Stand-up (copy)"), copy)
+    }
 }

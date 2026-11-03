@@ -308,7 +308,7 @@ class AppContainer(context: Context) {
     private fun startAutoRecord() {
         scope.launch {
             settingsStore.value
-                .map { listOf(it.autoRecord, it.autoRecordWhich, it.phoneCalendar, it.scheduledRecordings) }
+                .map { listOf(it.autoRecord, it.autoRecordWhich, it.phoneCalendar, it.scheduledRecordings, it.recordingPausedUntil) }
                 .distinctUntilChanged()
                 .collect {
                     autoRecorder.applySettings()
