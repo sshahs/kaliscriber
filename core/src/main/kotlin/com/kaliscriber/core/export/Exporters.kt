@@ -1,6 +1,7 @@
 package com.kaliscriber.core.export
 
 import com.kaliscriber.core.ai.await
+import com.kaliscriber.core.model.ActionItem
 import com.kaliscriber.core.model.Meeting
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -184,6 +185,14 @@ class CalDavExporter(
         )
         if (parts.isEmpty()) throw ExportException("Nothing to export: turn on the event or tasks, or generate action items first.")
         return ExportResult("Saved ${parts.joinToString(" and ")} to your calendar")
+    }
+
+    /** The collection action items go to as tasks, as stored on meetings that were exported. */
+    val tasksCollection: String get() = collection(tasksUrl)
+
+    /** Writes one action item as its task (creating or replacing it). */
+    suspend fun putTask(meeting: Meeting, item: ActionItem, now: Long = System.currentTimeMillis()) {
+        put(tasksUrl, ICalendar.taskUid(meeting, item), ICalendar.task(meeting, item, now))
     }
 
     /** PROPFIND on the collection to check the URL and credentials. */

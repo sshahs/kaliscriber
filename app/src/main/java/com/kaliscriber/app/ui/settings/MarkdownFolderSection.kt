@@ -64,3 +64,31 @@ internal fun MarkdownFolderSection(settings: AppSettings, vm: SettingsViewModel)
         }
     }
 }
+
+/** Keeping exported tasks in step with the calendar both ways, with when it last happened. */
+@Composable
+internal fun TaskSyncRow(enabled: Boolean, vm: SettingsViewModel) {
+    val status by vm.taskSyncStatus.collectAsStateWithLifecycle()
+    ToggleRow(
+        "Keep tasks in step both ways",
+        "For meetings you've exported: ticking or editing an action item here updates its task, and ticking or editing the task in your calendar or tasks app updates the action item.",
+        enabled,
+    ) { v -> vm.updateExport { it.copy(caldavTaskSync = v) } }
+    if (!enabled) return
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text(
+            when (val s = status) {
+                com.kaliscriber.app.tasks.TaskSyncer.Status.Idle -> "Checks every half hour"
+                com.kaliscriber.app.tasks.TaskSyncer.Status.Working -> "Syncing…"
+                is com.kaliscriber.app.tasks.TaskSyncer.Status.Done ->
+                    "Synced " + DateUtils.getRelativeTimeSpanString(s.at, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS) +
+                        if (s.pushed + s.pulled > 0) " · ${s.pushed} sent, ${s.pulled} received" else ""
+                is com.kaliscriber.app.tasks.TaskSyncer.Status.Failed -> s.message
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (status is com.kaliscriber.app.tasks.TaskSyncer.Status.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = vm::syncTasksNow, enabled = status != com.kaliscriber.app.tasks.TaskSyncer.Status.Working) { Text("Sync now") }
+    }
+}

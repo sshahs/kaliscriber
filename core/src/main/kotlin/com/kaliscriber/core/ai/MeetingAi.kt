@@ -165,6 +165,7 @@ class MeetingAi(
         val task = Prompts.insightsTask(format) + if (agenda.isEmpty()) "" else "\n" + Prompts.agendaTask(agenda)
         val obj = meetingJson(meeting, task, insightsSource(meeting, fromNotes))
         val previous = meeting.insights?.actionItems.orEmpty()
+        val reused = HashSet<String>()
         return MeetingInsights(
             title = obj.str("title").orEmpty(),
             summary = obj.str("summary", "executiveSummary").orEmpty(),
@@ -177,10 +178,13 @@ class MeetingAi(
             actionItems = obj.list("actionItems", "action_items").mapNotNull { el ->
                 val a = el as? JsonObject
                 val task = (a?.str("task", "item", "description") ?: el.asText())?.trim() ?: return@mapNotNull null
-                // Keep the done state for tasks that survive a regeneration.
+                // A task that survives a regeneration keeps its id (and so its calendar task) and done state.
+                val same = previous.firstOrNull { it.task.equals(task, ignoreCase = true) && it.id !in reused }?.also { reused += it.id }
                 val wasDone = previous.any { it.done && it.task.equals(task, ignoreCase = true) }
                 ActionItem(
-                    id = Ids.new(),
+                    id = same?.id ?: Ids.new(),
+                    updatedAt = same?.updatedAt ?: 0,
+                    syncedAt = same?.syncedAt ?: 0,
                     task = task,
                     owner = a?.str("owner", "assignee")?.takeUnless { it.equals("null", true) || it.equals("unassigned", true) },
                     dueDate = a?.str("dueDate", "due", "deadline")?.takeUnless { it.equals("null", true) },

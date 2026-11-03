@@ -398,7 +398,8 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
             when (target) {
                 ExportTarget.NOTION -> exporter.notion(m)
                 ExportTarget.AFFINE -> exporter.affine(m)
-                ExportTarget.CALDAV -> exporter.caldav(m)
+                // From now on its tasks and action items are kept in step.
+                ExportTarget.CALDAV -> exporter.caldav(m).also { container.taskSync.markExported(m.id) }
                 ExportTarget.EMAIL, ExportTarget.GOOGLE_DOCS -> error("Handled by the screen")
             }
         }

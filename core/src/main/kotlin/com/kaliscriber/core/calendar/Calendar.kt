@@ -40,8 +40,57 @@ data class CalendarEvent(
     val location: String? = null,
 )
 
-/** Reads the VEVENTs of iCalendar (RFC 5545) text. */
+/** A task (VTODO) as far as keeping action items in step needs it. */
+data class IcsTask(
+    val uid: String,
+    val summary: String,
+    val done: Boolean,
+    /** The due date as YYYY-MM-DD. */
+    val dueIso: String?,
+    /** When it last changed on the server (LAST-MODIFIED, else DTSTAMP), epoch ms; 0 if unknown. */
+    val lastModified: Long,
+)
+
+/** Reads the VEVENTs (and VTODOs) of iCalendar (RFC 5545) text. */
 object Ics {
+    /** The VTODOs in [text]. */
+    fun tasks(text: String): List<IcsTask> {
+        val out = mutableListOf<IcsTask>()
+        var props: MutableList<Prop>? = null
+        var depth = 0
+        for (line in unfold(text)) {
+            when {
+                line.equals("BEGIN:VTODO", ignoreCase = true) -> {
+                    props = mutableListOf()
+                    depth = 0
+                }
+                line.equals("END:VTODO", ignoreCase = true) -> {
+                    props?.let { p -> toTask(p)?.let(out::add) }
+                    props = null
+                }
+                line.startsWith("BEGIN:", ignoreCase = true) && props != null -> depth++
+                line.startsWith("END:", ignoreCase = true) && props != null -> depth--
+                props != null && depth == 0 -> parse(line)?.let(props::add)
+            }
+        }
+        return out
+    }
+
+    private fun toTask(props: List<Prop>): IcsTask? {
+        fun prop(name: String) = props.firstOrNull { it.name == name }
+        val uid = prop("UID")?.value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val done = prop("STATUS")?.value.equals("COMPLETED", ignoreCase = true) || prop("COMPLETED") != null ||
+            prop("PERCENT-COMPLETE")?.value?.trim() == "100"
+        val due = prop("DUE")?.value?.trim()?.take(8)?.takeIf { it.length == 8 && it.all(Char::isDigit) }
+            ?.let { "${it.substring(0, 4)}-${it.substring(4, 6)}-${it.substring(6, 8)}" }
+        val changed = (prop("LAST-MODIFIED") ?: prop("DTSTAMP"))?.value?.let(::utcStamp) ?: 0L
+        return IcsTask(uid, text(prop("SUMMARY")?.value.orEmpty()), done, due, changed)
+    }
+
+    /** "20261103T101500Z" as epoch ms (a stamp without the Z is read as UTC too). */
+    private fun utcStamp(value: String): Long? = runCatching {
+        LocalDateTime.parse(value.trim().removeSuffix("Z"), DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")).toInstant(ZoneOffset.UTC).toEpochMilli()
+    }.getOrNull()
 
     fun events(text: String, zone: ZoneId = ZoneId.systemDefault()): List<CalendarEvent> {
         val lines = unfold(text)
@@ -217,8 +266,39 @@ class CalDavCalendar(http: OkHttpClient, private val url: String, username: Stri
         return parseMultistatus(text).filter { it.end > from && it.start < to }.sortedBy { it.start }
     }
 
+    /** Every VTODO in the collection (tasks have no time range to ask for). */
+    suspend fun tasks(): List<IcsTask> {
+        val collection = url.trim().let { if (it.endsWith("/")) it else "$it/" }
+        if (collection.toHttpUrlOrNull() == null) throw ExportException("The CalDAV URL is not valid: ${url.trim()}")
+        val body = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+              <D:prop><D:getetag/><C:calendar-data/></D:prop>
+              <C:filter><C:comp-filter name="VCALENDAR"><C:comp-filter name="VTODO"/></C:comp-filter></C:filter>
+            </C:calendar-query>
+        """.trimIndent()
+        val request = Request.Builder().url(collection)
+            .header("Depth", "1")
+            .method("REPORT", body.toRequestBody("application/xml; charset=utf-8".toMediaType()))
+            .build()
+        val response = try {
+            http.newCall(request).await()
+        } catch (e: IOException) {
+            throw ExportException("Could not reach your calendar: ${e.message}", e)
+        }
+        val text = response.use {
+            if (!it.isSuccessful) throw ExportException(if (it.code == 401) "The calendar rejected the username or password." else "Calendar error ${it.code}")
+            it.body?.string().orEmpty()
+        }
+        return parseTasks(text)
+    }
+
     companion object {
         private val UTC = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
+
+        /** Tasks in a CalDAV multistatus reply. */
+        fun parseTasks(xml: String): List<IcsTask> =
+            CALENDAR_DATA.findAll(xml).flatMap { Ics.tasks(unescape(it.groupValues[1])) }.distinctBy { it.uid }.toList()
         private val CALENDAR_DATA = Regex("""<(?:[A-Za-z0-9_-]+:)?calendar-data[^>]*>(.*?)</(?:[A-Za-z0-9_-]+:)?calendar-data>""", RegexOption.DOT_MATCHES_ALL)
 
         private fun utc(ms: Long) = UTC.format(Instant.ofEpochMilli(ms))

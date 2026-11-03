@@ -38,6 +38,7 @@ object ICalendar {
         val props = mutableListOf(
             "UID" to taskUid(meeting, item),
             "DTSTAMP" to utc(now),
+            "LAST-MODIFIED" to utc(now),
             "SUMMARY" to escape(item.task),
             "DESCRIPTION" to escape(description),
             "STATUS" to if (item.done) "COMPLETED" else "NEEDS-ACTION",

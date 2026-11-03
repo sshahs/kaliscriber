@@ -272,6 +272,14 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         container.scope.launch { container.autoRecorder.unskip(AutoRecord.key(event)) }
     }
 
+    // --- Task sync -----------------------------------------------------------------------------------
+
+    val taskSyncStatus = container.taskSync.status
+
+    fun syncTasksNow() {
+        container.scope.launch { container.taskSync.sync() }
+    }
+
     // --- Markdown folder -------------------------------------------------------------------------
 
     val markdownStatus = container.markdownSync.status

@@ -286,6 +286,8 @@ data class ExportSettings(
     val caldavUser: String = "",
     val caldavEvent: Boolean = true,
     val caldavTasks: Boolean = true,
+    /** Keep exported tasks and action items in step both ways: ticks and edits here or in the calendar. */
+    val caldavTaskSync: Boolean = true,
     /** Read this calendar to title meetings, know who is invited and prepare for the next one. */
     val calendarLookup: Boolean = true,
     /** Upload straight to Google Docs with the user's Google account (needs an OAuth client). */

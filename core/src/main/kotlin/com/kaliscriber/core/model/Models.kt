@@ -54,6 +54,8 @@ data class Meeting(
     val formatId: String? = null,
     /** What the meeting was meant to cover, one item per line; the notes say which items were covered. */
     val agenda: String = "",
+    /** The CalDAV collection its action items were exported to as tasks, kept in step from then on. */
+    val tasksExportedTo: String? = null,
     /** When the recording was deleted to save space (the transcript and notes were kept). */
     val audioDeletedAt: Long? = null,
     /**
@@ -252,6 +254,10 @@ data class ActionItem(
     val done: Boolean = false,
     /** True once the user changed the task, owner or due date; regenerating the summary keeps those edits. */
     val edited: Boolean = false,
+    /** When the user last ticked or edited it here (epoch ms; 0 for never or before this was kept). */
+    val updatedAt: Long = 0,
+    /** When it was last made the same as its calendar task (epoch ms; 0 for never). */
+    val syncedAt: Long = 0,
 )
 
 @Serializable

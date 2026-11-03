@@ -192,12 +192,14 @@ class MeetingRepository(
     /** Changes one action item; marks it as edited so a regenerated summary keeps the change. */
     suspend fun editActionItem(meetingId: String, itemId: String, transform: (ActionItem) -> ActionItem) = update(meetingId) { m ->
         val insights = m.insights ?: return@update m
-        m.copy(insights = insights.copy(actionItems = insights.actionItems.map { if (it.id == itemId) transform(it).copy(edited = true) else it }))
+        val now = clock.now()
+        m.copy(insights = insights.copy(actionItems = insights.actionItems.map { if (it.id == itemId) transform(it).copy(edited = true, updatedAt = now) else it }))
     }
 
     suspend fun setActionItemDone(meetingId: String, itemId: String, done: Boolean) = update(meetingId) { m ->
         val insights = m.insights ?: return@update m
-        m.copy(insights = insights.copy(actionItems = insights.actionItems.map { if (it.id == itemId) it.copy(done = done) else it }))
+        val now = clock.now()
+        m.copy(insights = insights.copy(actionItems = insights.actionItems.map { if (it.id == itemId && it.done != done) it.copy(done = done, updatedAt = now) else it }))
     }
 
     suspend fun answerQuestion(meetingId: String, questionId: String, answer: String) = update(meetingId) { m ->

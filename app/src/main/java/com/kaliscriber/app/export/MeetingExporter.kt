@@ -13,6 +13,8 @@ import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.export.AffineExporter
 import com.kaliscriber.core.export.CalDavExporter
+import com.kaliscriber.core.calendar.CalDavCalendar
+import com.kaliscriber.core.calendar.IcsTask
 import com.kaliscriber.core.export.ExportContent
 import com.kaliscriber.core.export.ExportDocument
 import com.kaliscriber.core.export.ExportException
@@ -118,6 +120,20 @@ class MeetingExporter(
     }
 
     suspend fun testCaldav(): ExportResult = calDav().test()
+
+    /** The CalDAV client for tasks, or null when the calendar isn't set up. */
+    fun calDavTasks(): CalDavExporter? {
+        val e = settings().export
+        if (e.caldavUrl.isBlank() || e.caldavUser.isBlank() || secrets.secret(ExportSecret.CALDAV_PASSWORD).isNullOrBlank()) return null
+        return runCatching { calDav().also { it.tasksCollection } }.getOrNull()
+    }
+
+    /** Every task in the tasks collection. */
+    suspend fun remoteTasks(): List<IcsTask> {
+        val e = settings().export
+        val url = e.caldavTasksUrl.ifBlank { e.caldavUrl }
+        return CalDavCalendar(http, url, e.caldavUser.trim(), secrets.secret(ExportSecret.CALDAV_PASSWORD).orEmpty()).tasks()
+    }
 
     private fun calDav(): CalDavExporter {
         val e = settings().export

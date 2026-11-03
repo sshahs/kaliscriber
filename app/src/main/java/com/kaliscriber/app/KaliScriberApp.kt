@@ -169,6 +169,8 @@ class AppContainer(context: Context) {
         liveScope = scope,
     )
     val exporter = MeetingExporter(appContext, http, secrets, settings)
+    /** Exported action items and their calendar tasks, kept in step both ways. */
+    val taskSync = com.kaliscriber.app.tasks.TaskSyncer(appContext, meetings, exporter, settings)
     /** Long jobs started from a meeting screen, kept running in the background. */
     val jobs = MeetingJobs(appContext, scope)
     /** Audio and video files picked in the app, shared to it or opened with it. */
@@ -291,6 +293,8 @@ class AppContainer(context: Context) {
             recoverInterruptedMeetings()
             // Only once meetings are loaded, so an empty list never looks like everything was deleted.
             markdownSync.start(scope, settingsStore.value)
+            taskSync.start(scope)
+            launch { runCatching { taskSync.sync() } }
             startAutoRecord()
             // Recordings older than the user keeps them are deleted, keeping transcripts.
             runCatching { storage.applyRetention() }.onFailure { Log.w("KaliScriber", "Couldn't delete old recordings", it) }
@@ -314,6 +318,13 @@ class AppContainer(context: Context) {
                     autoRecorder.applySettings()
                     runCatching { autoRecorder.tick(refresh = true) }.onFailure { Log.w("KaliScriber", "Auto-record check failed", it) }
                 }
+        }
+        scope.launch {
+            settingsStore.value
+                .map { it.export.caldavTaskSync to it.export.caldavUrl.isNotBlank() }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { runCatching { taskSync.applySettings() } }
         }
         // The next-recording widget follows the schedule, the calendar and the recorder.
         scope.launch {
