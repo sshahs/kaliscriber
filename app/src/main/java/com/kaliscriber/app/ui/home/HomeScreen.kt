@@ -106,6 +106,8 @@ import com.kaliscriber.app.data.Deletions
 import com.kaliscriber.app.appContainer
 import com.kaliscriber.app.appViewModel
 import com.kaliscriber.app.recording.RecordingState
+import com.kaliscriber.app.ui.settings.SettingsPage
+import com.kaliscriber.app.ui.schedule.ScheduleTab
 import com.kaliscriber.app.ui.common.EmptyState
 import com.kaliscriber.app.ui.people.PeopleTab
 import com.kaliscriber.app.ui.tasks.TasksTab
@@ -128,6 +130,7 @@ private const val TAB_MEETINGS = 0
 private const val TAB_NOTES = 1
 private const val TAB_TASKS = 2
 private const val TAB_PEOPLE = 3
+private const val TAB_SCHEDULE = 4
 
 /** Words that start a question, so pressing Search on one asks across meetings instead. */
 private val QUESTION = Regex("""(?i)^(what|who|when|where|why|how|which|did|do|does|is|are|was|were|can|could|should|will|has|have)\b.*|.*\?$""")
@@ -144,8 +147,10 @@ fun HomeScreen(
     onAskAll: (question: String?) -> Unit = {},
     onOpenPerson: (String) -> Unit = {},
     onOpenRecap: () -> Unit = {},
-    /** Opens recordings scheduled for set times. */
-    onOpenSchedule: () -> Unit = {},
+    /** Opens the editor for a scheduled recording; null for a new one. */
+    onEditSchedule: (String?) -> Unit = {},
+    /** Opens one page of Settings. */
+    onOpenSettingsPage: (SettingsPage) -> Unit = { onOpenSettings() },
     /** Opens first-run setup. */
     onOpenSetup: () -> Unit = onOpenSettings,
     startTab: Int = 0,
@@ -165,7 +170,7 @@ fun HomeScreen(
     val firstRun by vm.firstRun.collectAsStateWithLifecycle()
     LaunchedEffect(firstRun) { if (firstRun) onOpenSetup() }
     val prep by vm.prep.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableIntStateOf(startTab.coerceIn(0, 3)) }
+    var tab by rememberSaveable { mutableIntStateOf(startTab.coerceIn(0, 4)) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -233,7 +238,7 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(listOf("Meetings", "Notes", "Tasks", "People")[tab]) },
+                title = { Text(listOf("Meetings", "Notes", "Tasks", "People", "Schedule")[tab]) },
                 actions = {
                     IconButton(onClick = { importer.launch(IMPORT_TYPES) }) {
                         Icon(Icons.Filled.AudioFile, contentDescription = "Import a recording or transcript")
@@ -247,6 +252,10 @@ fun HomeScreen(
                 NavigationBarItem(
                     selected = tab == TAB_MEETINGS, onClick = { tab = TAB_MEETINGS },
                     icon = { Icon(Icons.Filled.Groups, null) }, label = { Text("Meetings") },
+                )
+                NavigationBarItem(
+                    selected = tab == TAB_SCHEDULE, onClick = { tab = TAB_SCHEDULE },
+                    icon = { Icon(Icons.Filled.Schedule, null) }, label = { Text("Schedule") },
                 )
                 NavigationBarItem(
                     selected = tab == TAB_NOTES, onClick = { tab = TAB_NOTES },
@@ -273,6 +282,12 @@ fun HomeScreen(
                     icon = { Icon(if (recording is RecordingState.Idle) Icons.Filled.Mic else Icons.Filled.FiberManualRecord, null) },
                     text = { Text(if (recording is RecordingState.Idle) "Record meeting" else "Recording…") },
                 )
+            } else if (tab == TAB_SCHEDULE) {
+                ExtendedFloatingActionButton(
+                    onClick = { onEditSchedule(null) },
+                    icon = { Icon(Icons.Filled.Add, null) },
+                    text = { Text("Schedule") },
+                )
             } else if (tab == TAB_NOTES) {
                 ExtendedFloatingActionButton(
                     onClick = { scope.launch { onOpenNote(vm.createNote()) } },
@@ -290,6 +305,10 @@ fun HomeScreen(
             }
             if (tab == TAB_PEOPLE) {
                 PeopleTab(onOpenPerson = onOpenPerson, modifier = Modifier.weight(1f))
+                return@Column
+            }
+            if (tab == TAB_SCHEDULE) {
+                ScheduleTab(onEdit = onEditSchedule, onOpenSettingsPage = onOpenSettingsPage, modifier = Modifier.weight(1f))
                 return@Column
             }
             OutlinedTextField(
@@ -319,7 +338,6 @@ fun HomeScreen(
                     showFilters = hasMeetings,
                     onAskAll = { onAskAll(null) },
                     onOpenRecap = onOpenRecap,
-                    onOpenSchedule = onOpenSchedule,
                     onFilter = { vm.filter.value = it },
                 )
             }
@@ -438,7 +456,6 @@ private fun MeetingChips(
     showFilters: Boolean,
     onAskAll: () -> Unit,
     onOpenRecap: () -> Unit,
-    onOpenSchedule: () -> Unit,
     onFilter: (MeetingList.Filter) -> Unit,
 ) {
     var personMenu by remember { mutableStateOf(false) }
@@ -450,7 +467,6 @@ private fun MeetingChips(
     ) {
         AssistChip(onClick = onAskAll, label = { Text("Ask all meetings") }, leadingIcon = { Icon(Icons.Filled.QuestionAnswer, null, Modifier.size(18.dp)) })
         AssistChip(onClick = onOpenRecap, label = { Text("Weekly recap") }, leadingIcon = { Icon(Icons.Filled.DateRange, null, Modifier.size(18.dp)) })
-        AssistChip(onClick = onOpenSchedule, label = { Text("Scheduled") }, leadingIcon = { Icon(Icons.Filled.Schedule, null, Modifier.size(18.dp)) })
         if (!showFilters) return@Row
         FilterChip(
             selected = filter.needsAttention,

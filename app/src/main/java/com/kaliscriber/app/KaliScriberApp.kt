@@ -211,7 +211,7 @@ class AppContainer(context: Context) {
 
     /** Records calendar meetings by themselves, from their start to their end. */
     val autoRecorder: AutoRecorder = AutoRecorder(
-        appContext, calendar, recorder, pipeline, settings, visibility,
+        appContext, calendar, recorder, pipeline, notes, settings, visibility,
         JsonValueStore(File(filesDir, "auto-record.json"), AutoRecord.State.serializer(), AutoRecord.State()),
     )
 

@@ -53,4 +53,31 @@ class ScheduledRecordingTest {
         val skipped = none.copy(skipped = mapOf(AutoRecord.key(event) to event.end))
         assertEquals(AutoRecord.Decision.Nothing, AutoRecord.decide(listOf(event), at("2026-10-14T09:30"), AutoRecord.Which.ALL, skipped, AutoRecord.Recorder.IDLE))
     }
+
+    @Test
+    fun `chosen days, every day, paused schedules, reminders and labels`() {
+        // Wednesday 14 Oct 2026, 14:00–15:00, on Mondays and Thursdays.
+        val base = ScheduledRecording("x", "Review", at("2026-10-14T14:00"), at("2026-10-14T15:00"))
+        val custom = base.copy(repeat = Repeat.CUSTOM, days = listOf(4, 1), remindMinutes = 10)
+        val days = ScheduledRecordings.occurrences(listOf(custom), at("2026-10-14T00:00"), at("2026-10-21T00:00"), zone)
+            .map { java.time.Instant.ofEpochMilli(it.start).atZone(zone).toLocalDate().dayOfWeek.value }
+        assertEquals(listOf(4, 1), days, "Thursday 15th then Monday 19th")
+        assertEquals("Mon and Thu", ScheduledRecordings.repeatLabel(custom, zone, java.util.Locale.UK))
+        assertEquals("Every Wednesday", ScheduledRecordings.repeatLabel(base.copy(repeat = Repeat.WEEKLY), zone, java.util.Locale.UK))
+        assertEquals(7, ScheduledRecordings.occurrences(listOf(base.copy(repeat = Repeat.DAILY)), at("2026-10-14T00:00"), at("2026-10-21T00:00"), zone).size)
+
+        val first = ScheduledRecordings.occurrences(listOf(custom), at("2026-10-14T00:00"), at("2026-10-21T00:00"), zone).first()
+        assertEquals(at("2026-10-15T13:50"), ScheduledRecordings.reminderAt(first, listOf(custom)))
+        assertNull(ScheduledRecordings.reminderAt(first, listOf(custom.copy(remindMinutes = 0))))
+
+        // Paused: no occurrences, but its next time is still known for showing.
+        val paused = custom.copy(enabled = false)
+        assertTrue(ScheduledRecordings.occurrences(listOf(paused), at("2026-10-14T00:00"), at("2026-10-21T00:00"), zone).isEmpty())
+        assertEquals(at("2026-10-15T14:00"), ScheduledRecordings.next(paused, at("2026-10-14T16:00"), zone)?.start)
+
+        val mine = listOf(com.kaliscriber.core.ai.CustomFormat("f", "Ticket review"))
+        assertEquals("Ticket review", ScheduledRecordings.formatLabel(base.copy(formatId = "f"), mine))
+        assertEquals("1:1", ScheduledRecordings.formatLabel(base.copy(type = com.kaliscriber.core.ai.MeetingType.ONE_ON_ONE), mine))
+        assertNull(ScheduledRecordings.formatLabel(base, mine))
+    }
 }

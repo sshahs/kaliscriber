@@ -28,6 +28,8 @@ import com.kaliscriber.core.calendar.CalendarEvent
 import com.kaliscriber.core.calendar.ScheduledRecordings
 import com.kaliscriber.core.pipeline.MeetingPipeline
 import com.kaliscriber.core.store.JsonValueStore
+import com.kaliscriber.core.calendar.ScheduledRecording
+import com.kaliscriber.core.store.NoteRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -52,6 +54,7 @@ class AutoRecorder(
     private val calendar: CalendarService,
     private val recorder: RecordingManager,
     private val pipeline: MeetingPipeline,
+    private val notes: NoteRepository,
     private val settings: () -> AppSettings,
     private val visibility: AppVisibility,
     private val store: JsonValueStore<AutoRecord.State>,
@@ -95,6 +98,7 @@ class AutoRecorder(
         st.active?.let { if (!recorder.isCapturing(it.meetingId)) st = st.copy(active = null) }
 
         val events = allEvents(st, now)
+        st = remind(events, now, st)
         var decision = AutoRecord.decide(events, now, s.autoRecordWhich, st, recorderState(st))
         if (decision == AutoRecord.Decision.Stop) {
             val active = st.active!!
@@ -115,8 +119,30 @@ class AutoRecorder(
             st = begin(event) ?: st
         }
         store.update { st }
-        return AutoRecord.nextWake(events, now, s.autoRecordWhich, st, recorderState(st))
+        return listOfNotNull(AutoRecord.nextWake(events, now, s.autoRecordWhich, st, recorderState(st)), nextReminder(events, now, st)).minOrNull()
     }
+
+    /** Announces scheduled recordings whose reminder time has come; returns the state with them marked. */
+    private fun remind(events: List<CalendarEvent>, now: Long, start: AutoRecord.State): AutoRecord.State {
+        var st = start
+        for (event in pendingReminders(events, st)) {
+            val at = ScheduledRecordings.reminderAt(event, settings().scheduledRecordings) ?: continue
+            if (now < at || now >= event.start) continue
+            val time = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(event.start))
+            notify(event, "${event.title} at $time", "KaliScriber will record it from $time.", ask = false, skippable = true)
+            st = st.copy(reminded = st.reminded + (AutoRecord.key(event) to event.end))
+        }
+        return st
+    }
+
+    private fun nextReminder(events: List<CalendarEvent>, now: Long, st: AutoRecord.State): Long? =
+        pendingReminders(events, st).mapNotNull { ScheduledRecordings.reminderAt(it, settings().scheduledRecordings) }.filter { it > now }.minOrNull()
+
+    private fun pendingReminders(events: List<CalendarEvent>, st: AutoRecord.State): List<CalendarEvent> =
+        events.filter { e ->
+            val key = AutoRecord.key(e)
+            ScheduledRecordings.isScheduled(e) && key !in st.reminded && key !in st.handled && key !in st.skipped
+        }
 
     /**
      * Calendar events (when auto-record is on) and the recordings scheduled in the app. Only the
@@ -180,8 +206,28 @@ class AutoRecorder(
             starting = null
         }
         cancelNotification()
+        ScheduledRecordings.scheduleFor(event, settings().scheduledRecordings)?.let { applySchedule(id, it) }
         val active = AutoRecord.Active(AutoRecord.key(event), id, event.title, event.end)
         return store.value.value.copy(active = active, handled = store.value.value.handled + (active.key to event.end))
+    }
+
+    /** Gives a scheduled recording's meeting the format, number of people and agenda the user set. */
+    private suspend fun applySchedule(meetingId: String, schedule: ScheduledRecording) {
+        try {
+            val custom = schedule.formatId?.takeIf { id -> settings().customFormats.any { it.id == id } }
+            when {
+                custom != null -> pipeline.setCustomFormat(meetingId, custom)
+                schedule.type != null -> pipeline.setMeetingType(meetingId, schedule.type)
+            }
+            schedule.expectedSpeakers?.let { pipeline.setExpectedSpeakers(meetingId, it) }
+            if (schedule.agenda.isNotBlank()) {
+                notes.create(title = "Agenda: ${schedule.title.ifBlank { "Scheduled recording" }}", content = schedule.agenda.trim(), meetingId = meetingId)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Couldn't apply the schedule's settings", e)
+        }
     }
 
     /** Doesn't record the occurrence [key]. */
@@ -263,7 +309,7 @@ class AutoRecorder(
         }
     }
 
-    private fun notify(event: CalendarEvent, title: String, text: String, ask: Boolean) {
+    private fun notify(event: CalendarEvent, title: String, text: String, ask: Boolean, skippable: Boolean = ask) {
         val key = AutoRecord.key(event)
         val builder = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_mic)
@@ -274,17 +320,18 @@ class AutoRecorder(
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setTimeoutAfter((event.end - System.currentTimeMillis()).coerceAtLeast(60_000))
+        val skip = PendingIntent.getBroadcast(
+            context, 11,
+            Intent(context, AutoRecordReceiver::class.java)
+                .setAction(AutoRecordReceiver.ACTION_SKIP)
+                .putExtra(AutoRecordReceiver.EXTRA_KEY, key)
+                .putExtra(AutoRecordReceiver.EXTRA_END, event.end),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        if (skippable && !ask) builder.addAction(0, "Don't record", skip)
         if (ask) {
             val record = PendingIntent.getActivity(
                 context, 10, AutoRecordActivity.intent(context, key),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-            val skip = PendingIntent.getBroadcast(
-                context, 11,
-                Intent(context, AutoRecordReceiver::class.java)
-                    .setAction(AutoRecordReceiver.ACTION_SKIP)
-                    .putExtra(AutoRecordReceiver.EXTRA_KEY, key)
-                    .putExtra(AutoRecordReceiver.EXTRA_END, event.end),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             builder.setContentIntent(record)

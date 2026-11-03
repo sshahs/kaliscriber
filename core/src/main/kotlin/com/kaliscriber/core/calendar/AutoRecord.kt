@@ -47,12 +47,19 @@ object AutoRecord {
         val skipped: Map<String, Long> = emptyMap(),
         /** The latest events read, used when an alarm fires and the calendar can't be read quickly. */
         val events: List<CalendarEvent> = emptyList(),
+        /** Occurrences already announced with a reminder. */
+        val reminded: Map<String, Long> = emptyMap(),
     ) {
         /** Forgets occurrences that ended more than a day before [now]. */
         fun pruned(now: Long): State {
             val cutoff = now - 24 * 3_600_000L
             fun Map<String, Long>.recent() = filterValues { it > cutoff }
-            return copy(handled = handled.recent(), skipped = skipped.recent(), events = events.filter { it.end > cutoff })
+            return copy(
+                handled = handled.recent(),
+                skipped = skipped.recent(),
+                reminded = reminded.recent(),
+                events = events.filter { it.end > cutoff },
+            )
         }
     }
 

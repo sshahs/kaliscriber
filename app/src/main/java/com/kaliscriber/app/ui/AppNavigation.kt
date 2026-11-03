@@ -18,7 +18,7 @@ import com.kaliscriber.app.ui.meeting.MeetingScreen
 import com.kaliscriber.app.ui.notes.NoteScreen
 import com.kaliscriber.app.ui.people.PersonScreen
 import com.kaliscriber.app.ui.recap.RecapScreen
-import com.kaliscriber.app.ui.schedule.ScheduleScreen
+import com.kaliscriber.app.ui.schedule.ScheduleEditScreen
 import com.kaliscriber.app.ui.recording.RecordingScreen
 import com.kaliscriber.app.ui.settings.SettingsPage
 import com.kaliscriber.app.ui.setup.SetupScreen
@@ -34,7 +34,8 @@ object Routes {
     const val ASK_ALL = "ask-all?q={q}"
     const val PERSON = "person/{name}"
     const val RECAP = "recap"
-    const val SCHEDULE = "schedule"
+    const val SCHEDULE_EDIT = "schedule/edit?id={id}"
+    fun scheduleEdit(id: String?) = "schedule/edit" + (id?.let { "?id=${Uri.encode(it)}" } ?: "")
     const val SETUP = "setup"
     fun person(name: String) = "person/${Uri.encode(name)}"
     fun meeting(id: String, tab: Int = 0, segmentId: String? = null) =
@@ -75,7 +76,8 @@ fun AppNavigation(openTasks: Boolean = false) {
                 onAskAll = { nav.navigate(Routes.askAll(it)) },
                 onOpenPerson = { nav.navigate(Routes.person(it)) },
                 onOpenRecap = { nav.navigate(Routes.RECAP) },
-                onOpenSchedule = { nav.navigate(Routes.SCHEDULE) },
+                onEditSchedule = { nav.navigate(Routes.scheduleEdit(it)) },
+                onOpenSettingsPage = { nav.navigate(Routes.settings(it)) },
                 onOpenSetup = { nav.navigate(Routes.SETUP) { launchSingleTop = true } },
                 startTab = if (openTasks) 2 else 0,
             )
@@ -83,8 +85,11 @@ fun AppNavigation(openTasks: Boolean = false) {
         composable(Routes.SETUP) {
             SetupScreen(onDone = { nav.popBackStack(Routes.HOME, inclusive = false) })
         }
-        composable(Routes.SCHEDULE) {
-            ScheduleScreen(onBack = { nav.popBackStack() })
+        composable(
+            Routes.SCHEDULE_EDIT,
+            arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null }),
+        ) { entry ->
+            ScheduleEditScreen(id = entry.arguments?.getString("id"), onBack = { nav.popBackStack() })
         }
         composable(Routes.RECAP) {
             RecapScreen(onBack = { nav.popBackStack() }, onOpenMeeting = { nav.navigate(Routes.meeting(it)) })
