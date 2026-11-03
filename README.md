@@ -148,6 +148,18 @@ The key comes from the `KALISCRIBER_KEYSTORE_BASE64` (a base64-encoded keystore 
 | Baikal / CalDAV | Calendar URL such as `https://<server>/dav.php/calendars/<user>/<calendar>/`, plus username and password (Basic and Digest auth are supported) |
 | Google Docs upload | Optional: an Android OAuth client for package `com.kaliscriber.app` with the SHA-1 shown in Settings, and the Drive API enabled. Without it, notes open in Google Docs as a Word file |
 
+## Building on Gitea
+
+`.gitea/workflows/android.yml` builds the app on a Gitea instance with [act_runner](https://docs.gitea.com/usage/actions/act-runner), for example on a pull mirror of this GitHub repository. Each mirror sync that brings new commits runs the tests and builds the APKs, which you can download from the run's artifacts. Gitea uses `.gitea/workflows` and ignores `.github/workflows` when that directory exists.
+
+Setting it up:
+
+1. **Enable Actions** on the Gitea repository (Settings → Repository → Actions), with Actions enabled on the instance.
+2. **A runner** registered for the repository, owner or instance, with an `ubuntu-latest` label pointing at an image with Node.js, such as `ubuntu-latest:docker://gitea/runner-images:ubuntu-latest` (act_runner's default). The workflow installs Java 17 and the Android SDK itself. A build needs about 4 GB of memory and internet access to Maven Central, Google's Maven repository and GitHub.
+3. **The same signing secrets as on GitHub**, `KALISCRIBER_KEYSTORE_BASE64` and `KALISCRIBER_KEYSTORE_PASSWORD`, added under the Gitea repository's Settings → Actions → Secrets. Without them builds are signed with a throwaway key and nothing is published; APKs signed with a different key wouldn't install as updates. Every APK is checked against `.github/signing-cert-sha256`.
+
+**Releases on Gitea** are attached to the tags that arrive from GitHub: when the mirror brings a `v<version>` tag (an official release) or a `build-<N>` tag (each GitHub build), the Gitea build of that tag publishes a release on it in the Gitea repository, with the APKs and a link to the Gitea commit and run. Official releases use the notes in `.github/release-notes/`. Gitea doesn't create tags of its own: on a pull mirror a tag made locally is deleted by the next sync. So a build started by hand, or from a branch, produces artifacts but no release.
+
 ## Build
 
 Requirements: JDK 17+ and the Android SDK (API 35). The first build downloads the sherpa-onnx AAR (50 MB, checksum-verified) into `app/libs/`.

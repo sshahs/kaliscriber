@@ -1,0 +1,170 @@
+# Builds KaliScriber on a Gitea instance with act_runner, typically a pull mirror of the GitHub
+# repository. Gitea runs workflows from .gitea/workflows and ignores .github/workflows when this
+# directory exists. See "Building on Gitea" in the README for the runner, the secrets and how
+# releases work on a mirror.
+name: Android CI (Gitea)
+
+on:
+  # A mirror sync delivers new commits and new tags as pushes.
+  push:
+    branches: ['**']
+    tags: ['v*', 'build-*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+
+      - uses: https://github.com/actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Runner images don't carry the Android SDK; the Gradle plugin fetches what else it needs.
+      - uses: https://github.com/android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Cache Gradle and the sherpa-onnx AAR
+        uses: https://github.com/actions/cache@v4
+        continue-on-error: true
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            app/libs
+          key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      # Updates only install over an app signed with the same key, so these must be the same
+      # KALISCRIBER_KEYSTORE_* secrets as on GitHub. Without them the build signs with a key made
+      # for this run alone and publishes nothing.
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KALISCRIBER_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KALISCRIBER_KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p ~/.kaliscriber
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > ~/.kaliscriber/release.jks
+            echo "KALISCRIBER_KEYSTORE=$HOME/.kaliscriber/release.jks" >> "$GITHUB_ENV"
+            echo "KALISCRIBER_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No KALISCRIBER_KEYSTORE_BASE64 secret: signing with a throwaway key, nothing will be published."
+            keytool -genkeypair -keystore ~/.kaliscriber/throwaway.jks -storepass throwaway -keypass throwaway \
+              -alias kaliscriber -keyalg RSA -keysize 2048 -validity 1 -dname "CN=KaliScriber throwaway build"
+            echo "KALISCRIBER_KEYSTORE=$HOME/.kaliscriber/throwaway.jks" >> "$GITHUB_ENV"
+            echo "KALISCRIBER_KEYSTORE_PASSWORD=throwaway" >> "$GITHUB_ENV"
+          fi
+
+      - name: Unit tests (core)
+        run: ./gradlew :core:test --stacktrace
+
+      - name: Build APKs
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
+
+      # build-N tags come from the GitHub build with that run number, so the files are named alike.
+      - name: Name the release APKs
+        id: apk
+        run: |
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          case "$GITHUB_REF" in
+            refs/tags/build-*) BUILD="${GITHUB_REF_NAME#build-}" ;;
+            *) BUILD="${GITHUB_RUN_NUMBER}" ;;
+          esac
+          mkdir -p release
+          for f in app/build/outputs/apk/release/app-*-release.apk; do
+            abi=$(basename "$f" | sed -E 's/^app-(.*)-release\.apk$/\1/')
+            cp "$f" "release/kaliscriber-${VERSION}-build${BUILD}-${abi}.apk"
+          done
+          ls -la release
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Phones only install an update signed with the same key as the installed app.
+      - name: Check signing certificate
+        id: cert
+        run: |
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner"
+          EXPECTED=$(tr -d '[:space:]' < .github/signing-cert-sha256)
+          for f in release/*.apk; do
+            ACTUAL=$("$APKSIGNER" verify --print-certs "$f" | grep -m1 'certificate SHA-256 digest' | sed 's/.*digest: //')
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "::warning::$(basename "$f") is signed with $ACTUAL, not the release key $EXPECTED. It won't install as an update and won't be published."
+              echo "match=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "match=true" >> "$GITHUB_OUTPUT"
+
+      # v3 works with every Gitea version (v4 needs Gitea 1.22 or later).
+      - uses: https://github.com/actions/upload-artifact@v3
+        with:
+          name: kaliscriber-apks
+          path: release/*.apk
+          if-no-files-found: error
+
+      # Releases go on tags that come from GitHub through the mirror: v<version> for official
+      # releases, build-<N> for each build. A tag made on a pull mirror is deleted by its next
+      # sync, so this never creates one; the release is attached to the mirrored tag instead.
+      - name: Publish Gitea release
+        if: startsWith(github.ref, 'refs/tags/') && steps.cert.outputs.match == 'true'
+        env:
+          TOKEN: ${{ secrets.GITEA_TOKEN }}
+          VERSION: ${{ steps.apk.outputs.version }}
+        run: |
+          set -euo pipefail
+          if ! command -v python3 >/dev/null; then
+            if sudo -n true 2>/dev/null; then S=sudo; else S=; fi
+            $S apt-get update -qq && $S apt-get install -y -qq python3
+          fi
+          TAG="$GITHUB_REF_NAME"
+          REPO_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          API="$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY"
+          AUTH="Authorization: token $TOKEN"
+
+          case "$TAG" in
+            v*)
+              [ "$TAG" = "v$VERSION" ] || { echo "::error::Tag $TAG doesn't match versionName $VERSION"; exit 1; }
+              NAME="KaliScriber $VERSION"; PRERELEASE=false
+              NOTES=".github/release-notes/$TAG.md"
+              [ -f "$NOTES" ] || { echo "::error::Missing $NOTES"; exit 1; }
+              cp "$NOTES" body.md ;;
+            *)
+              NAME="KaliScriber $VERSION (${TAG/build-/build })"; PRERELEASE=true
+              printf '%s\n' "Android APKs for $TAG." \
+                "Most phones: the \`arm64-v8a\` APK. Older 32-bit phones: \`armeabi-v7a\`. Emulators: \`x86_64\`. Not sure: \`universal\`." \
+                "Install by opening the APK on your phone (allow installs from your browser or file manager)." > body.md ;;
+          esac
+          printf '\n---\nBuilt on [%s](%s) from commit [%s](%s/commit/%s) by [this run](%s/actions/runs/%s).\n' \
+            "$GITHUB_REPOSITORY" "$REPO_URL" "${GITHUB_SHA:0:7}" "$REPO_URL" "$GITHUB_SHA" "$REPO_URL" "$GITHUB_RUN_NUMBER" >> body.md
+
+          export TAG NAME PRERELEASE
+          python3 -c 'import json,os; print(json.dumps({"tag_name": os.environ["TAG"], "name": os.environ["NAME"], "body": open("body.md").read(), "draft": False, "prerelease": os.environ["PRERELEASE"] == "true"}))' > release.json
+
+          # Creating a release on an existing tag turns the mirror's tag-only entry into a full
+          # release; if a full release already exists (a re-run), it is updated instead.
+          CODE=$(curl -sS -o response.json -w '%{http_code}' -X POST -H "$AUTH" -H 'Content-Type: application/json' --data @release.json "$API/releases")
+          if [ "$CODE" = "409" ]; then
+            curl -sSf -H "$AUTH" "$API/releases/tags/$TAG" -o existing.json
+            ID=$(python3 -c 'import json; print(json.load(open("existing.json"))["id"])')
+            curl -sSf -X PATCH -H "$AUTH" -H 'Content-Type: application/json' --data @release.json "$API/releases/$ID" -o response.json
+          elif [ "$CODE" != "201" ]; then
+            echo "::error::Creating the release failed ($CODE): $(cat response.json)"; exit 1
+          fi
+          ID=$(python3 -c 'import json; print(json.load(open("response.json"))["id"])')
+
+          # Replace files of the same name from an earlier run.
+          curl -sSf -H "$AUTH" "$API/releases/$ID/assets" -o assets.json
+          for f in release/*.apk; do
+            n=$(basename "$f")
+            for old in $(N="$n" python3 -c 'import json,os; print(" ".join(str(a["id"]) for a in json.load(open("assets.json")) if a["name"] == os.environ["N"]))'); do
+              curl -sSf -X DELETE -H "$AUTH" "$API/releases/$ID/assets/$old"
+            done
+            curl -sSf -X POST -H "$AUTH" -F "attachment=@$f" "$API/releases/$ID/assets?name=$n" > /dev/null
+            echo "Uploaded $n"
+          done
+          echo "Release: $REPO_URL/releases/tag/$TAG"
