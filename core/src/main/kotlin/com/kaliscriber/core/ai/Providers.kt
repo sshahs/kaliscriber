@@ -242,6 +242,15 @@ data class AppSettings(
     val backupRecordings: Boolean = false,
     /** Colours taken from the wallpaper (Android 12 and later) instead of the app's own. */
     val dynamicColor: Boolean = true,
+    /**
+     * The user's name, and other names people call them, separated by commas ("Sunny, Sunil Shah"),
+     * so the notes can say what they were asked and promised. Blank leaves that part out.
+     */
+    val yourName: String = "",
+    /** Private details masked before text is sent to the AI. */
+    val redaction: RedactionSettings = RedactionSettings(),
+    /** Projects (or clients) meetings are grouped into. */
+    val projects: List<com.kaliscriber.core.projects.Project> = emptyList(),
 ) {
     fun settingsFor(id: ProviderId): ProviderSettings = providers[id] ?: ProviderSettings()
 

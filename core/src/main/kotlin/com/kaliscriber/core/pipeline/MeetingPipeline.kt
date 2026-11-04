@@ -782,6 +782,11 @@ class MeetingPipeline(
         repo.update(meetingId) { it.copy(agenda = agenda.trim()) }
     }
 
+    /** Puts the meeting in a project ([com.kaliscriber.core.projects.Projects.NONE] for none, null to go by title words). */
+    suspend fun setProject(meetingId: String, projectId: String?) {
+        repo.update(meetingId) { it.copy(projectId = projectId) }
+    }
+
     /** Sets one of the user's own summary formats for the meeting. */
     suspend fun setCustomFormat(meetingId: String, formatId: String) {
         repo.update(meetingId) { it.copy(type = null, formatId = formatId) }

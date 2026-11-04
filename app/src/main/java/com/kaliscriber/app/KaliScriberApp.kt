@@ -5,7 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.net.ConnectivityManager
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import com.kaliscriber.app.backup.BackupManager
 import com.kaliscriber.app.calendar.CalendarService
 import com.kaliscriber.app.data.AndroidSqlDb
@@ -78,6 +78,14 @@ class KaliScriberApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLog.init(this)
+        // A crash is written to the problem-report log before Android ends the app.
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching { AppLog.crash(error, thread.name) }
+            previous?.uncaughtException(thread, error)
+        }
+        AppLog.i("App", "Started ${com.kaliscriber.app.diagnostics.ProblemReports.versionLine(this)}")
         container = AppContainer(this)
         registerActivityLifecycleCallbacks(container.visibility)
         createNotificationChannel()
@@ -130,7 +138,7 @@ class AppContainer(context: Context) {
     /** Full-text index of every transcript line, so search doesn't need transcripts in memory. */
     val searchIndex by lazy { TranscriptIndex(AndroidSqlDb(appContext.getDatabasePath("search.db")), ::textEmbedder) }
     /** Keeps [searchIndex] up to date. */
-    val searchIndexer by lazy { SearchIndexer(meetings, searchIndex, scope, log = { Log.i("KaliScriber", it) }) }
+    val searchIndexer by lazy { SearchIndexer(meetings, searchIndex, scope, log = { AppLog.i("KaliScriber", it) }) }
 
     @Volatile private var searchModel: StaticEmbeddingModel? = null
 
@@ -150,7 +158,7 @@ class AppContainer(context: Context) {
                     searchModelError = null
                 }
             } catch (e: Exception) {
-                Log.w("KaliScriber", "Smart search model couldn't be loaded", e)
+                AppLog.w("KaliScriber", "Smart search model couldn't be loaded", e)
                 searchModelError = e.message ?: e.javaClass.simpleName
                 null
             }
@@ -164,7 +172,7 @@ class AppContainer(context: Context) {
         meetings, ai, meetingAi, settings,
         voices = voices,
         embedder = { localSpeech },
-        log = { message -> Log.i("KaliScriber", message) },
+        log = { message -> AppLog.i("KaliScriber", message) },
         fetchDiarizationModels = { onProgress -> models.awaitDiarization(onProgress) },
         liveScope = scope,
     )
@@ -233,6 +241,9 @@ class AppContainer(context: Context) {
             JsonValueStore(File(filesDir, "auto-backup.json"), com.kaliscriber.core.backup.AutoBackupStatus.serializer(), com.kaliscriber.core.backup.AutoBackupStatus()),
         )
     }
+
+    /** Problem reports made from the app's log on the phone. */
+    val problemReports by lazy { com.kaliscriber.app.diagnostics.ProblemReports(this) }
 
     /** True when on-device speaker detection is wanted but its models are not on the phone yet. */
     val speakerPackMissing: Boolean
@@ -305,13 +316,13 @@ class AppContainer(context: Context) {
             launch { runCatching { taskSync.sync() } }
             startAutoRecord()
             // Recordings older than the user keeps them are deleted, keeping transcripts.
-            runCatching { storage.applyRetention() }.onFailure { Log.w("KaliScriber", "Couldn't delete old recordings", it) }
+            runCatching { storage.applyRetention() }.onFailure { AppLog.w("KaliScriber", "Couldn't delete old recordings", it) }
             // Voices saved with the previous speaker model are learned again once the new one is here.
             models.states.first { it[ModelCatalog.embedding.id] is ModelState.Ready }
             if (voices.outdated.isNotEmpty()) {
                 runCatching { pipeline.relearnVoices() }
-                    .onSuccess { Log.i("KaliScriber", "Voice memory: learned $it voice(s) again with the new speaker model") }
-                    .onFailure { Log.w("KaliScriber", "Voice memory: couldn't learn voices again", it) }
+                    .onSuccess { AppLog.i("KaliScriber", "Voice memory: learned $it voice(s) again with the new speaker model") }
+                    .onFailure { AppLog.w("KaliScriber", "Voice memory: couldn't learn voices again", it) }
             }
         }
     }
@@ -324,7 +335,7 @@ class AppContainer(context: Context) {
                 .distinctUntilChanged()
                 .collect {
                     autoRecorder.applySettings()
-                    runCatching { autoRecorder.tick(refresh = true) }.onFailure { Log.w("KaliScriber", "Auto-record check failed", it) }
+                    runCatching { autoRecorder.tick(refresh = true) }.onFailure { AppLog.w("KaliScriber", "Auto-record check failed", it) }
                 }
         }
         scope.launch {

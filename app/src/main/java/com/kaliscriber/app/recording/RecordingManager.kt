@@ -1,5 +1,6 @@
 package com.kaliscriber.app.recording
 
+import com.kaliscriber.app.diagnostics.AppLog
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
@@ -92,6 +93,7 @@ class RecordingManager(
         check(_state.value !is RecordingState.Recording && pendingMeetingId == null) { "A meeting is already being recorded" }
         val meeting = meetings.create(title)
         pendingMeetingId = meeting.id
+        AppLog.i(TAG, "Recording ${meeting.id}: starting")
         onStart(meeting.id)
         ContextCompat.startForegroundService(
             context,
@@ -128,6 +130,7 @@ class RecordingManager(
                 }
 
                 override fun onInterruption(reason: String?) {
+                    AppLog.i(TAG, "Recording $meetingId: " + (reason?.let { "microphone taken by $it" } ?: "microphone back"))
                     updateRecording(meetingId) { it.copy(interruption = reason) }
                 }
 
@@ -136,6 +139,7 @@ class RecordingManager(
                 }
 
                 override fun onError(error: Throwable) {
+                    AppLog.e(TAG, "Recording $meetingId: capture failed", error)
                     scope.launch {
                         meetings.update(meetingId) { it.copy(lastError = "Recording stopped: ${error.message}") }
                         stop()
@@ -146,6 +150,7 @@ class RecordingManager(
         try {
             captureEngine.start()
         } catch (e: Exception) {
+            AppLog.w(TAG, "Recording $meetingId: the microphone couldn't start", e)
             channel.close()
             scope.launch {
                 meetings.update(meetingId) { it.copy(status = MeetingStatus.ERROR, lastError = e.message ?: "Could not record") }
@@ -164,6 +169,7 @@ class RecordingManager(
             }
         }
         _state.value = RecordingState.Recording(meetingId, micNote = captureEngine.micNote)
+        AppLog.i(TAG, "Recording $meetingId: capturing (mic: ${captureEngine.micNote ?: settings().microphone.label}, chunks of ${settings().chunkSeconds}s)")
         return true
     }
 
@@ -203,6 +209,7 @@ class RecordingManager(
             val file = audioFile?.takeIf { it.exists() && it.length() > 0 }
             audioFile = null
             // Handed over to the processing below, so a new recording can start with its own.
+            AppLog.i(TAG, "Recording ${current.meetingId}: stopped after ${durationMs / 1000}s, recording file ${file?.length()?.let { "${it / 1024} KB" } ?: "missing"}, ${queued.get()} part(s) still to transcribe")
             Stopped(current.meetingId, durationMs, file, chunks, consumer, queued).also {
                 chunks = null
                 consumer = null
@@ -247,3 +254,5 @@ class RecordingManager(
         }
     }
 }
+
+private const val TAG = "Recording"

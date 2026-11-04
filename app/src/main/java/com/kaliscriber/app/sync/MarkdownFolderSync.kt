@@ -3,7 +3,7 @@ package com.kaliscriber.app.sync
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.store.JsonValueStore
 import com.kaliscriber.core.store.MeetingRepository
@@ -66,7 +66,7 @@ class MarkdownFolderSync(
                 _status.value = Status.Done(System.currentTimeMillis(), written)
                 written
             } catch (e: Exception) {
-                Log.w(TAG, "Markdown folder sync failed", e)
+                AppLog.w(TAG, "Markdown folder sync failed", e)
                 _status.value = Status.Failed(
                     if (e is SecurityException) "KaliScriber can no longer write to the folder. Choose it again." else e.message ?: "Couldn't write to the folder",
                 )
@@ -103,13 +103,14 @@ class MarkdownFolderSync(
         if (plan.isEmpty()) return 0
         val next = before.filterKeys { id -> all.any { it.id == id } }.toMutableMap()
         val custom = settings().customFormats
+        val projects = settings().projects
         var written = 0
         for (action in plan) {
             when (action) {
                 is MarkdownSync.Action.Delete -> {
                     files.remove(action.file)?.let { id ->
                         runCatching { DocumentsContract.deleteDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(tree, id)) }
-                            .onFailure { Log.w(TAG, "Couldn't delete ${action.file}", it) }
+                            .onFailure { AppLog.w(TAG, "Couldn't delete ${action.file}", it) }
                     }
                 }
                 is MarkdownSync.Action.Write -> {
@@ -119,7 +120,7 @@ class MarkdownFolderSync(
                         ?: error("Couldn't create ${action.file}")
                     files[action.file] = DocumentsContract.getDocumentId(doc)
                     resolver.openOutputStream(doc, "wt")?.use { out ->
-                        out.write(MarkdownSync.note(meeting, transcript, custom).toByteArray())
+                        out.write(MarkdownSync.note(meeting, transcript, custom, projects = projects).toByteArray())
                     } ?: error("Couldn't write ${action.file}")
                     next[meeting.id] = MarkdownSync.Entry(action.file, meeting.updatedAt, transcript)
                     written++

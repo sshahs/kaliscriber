@@ -5,7 +5,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.CalendarContract
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import androidx.core.content.ContextCompat
 import com.kaliscriber.core.calendar.CalendarEvent
 
@@ -21,7 +21,7 @@ class PhoneCalendar(private val context: Context) {
         return try {
             read(from, to)
         } catch (e: Exception) {
-            Log.w("KaliScriber", "Phone calendar: couldn't read events: ${e.message}")
+            AppLog.w("KaliScriber", "Phone calendar: couldn't read events: ${e.message}")
             emptyList()
         }
     }

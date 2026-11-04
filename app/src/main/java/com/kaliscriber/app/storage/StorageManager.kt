@@ -1,7 +1,7 @@
 package com.kaliscriber.app.storage
 
 import android.content.Context
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import com.kaliscriber.app.processing.MeetingJobs
 import com.kaliscriber.core.ai.AppSettings
 import com.kaliscriber.core.model.Meeting
@@ -54,7 +54,7 @@ class StorageManager(
         val due = due(settings().keepRecordingsDays)
         var freed = 0L
         for (m in due) freed += meetings.deleteRecording(m.id)
-        if (due.isNotEmpty()) Log.i("KaliScriber", "Deleted ${due.size} old recording(s), ${formatBytes(freed)}")
+        if (due.isNotEmpty()) AppLog.i("KaliScriber", "Deleted ${due.size} old recording(s), ${formatBytes(freed)}")
         due.size to freed
     }
 

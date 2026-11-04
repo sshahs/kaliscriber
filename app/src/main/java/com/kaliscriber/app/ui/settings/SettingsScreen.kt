@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
@@ -109,8 +110,8 @@ import kotlin.math.roundToInt
 /** The pages Settings is split into; [keywords] let the search box find what is on each. */
 enum class SettingsPage(val title: String, val summary: String, val keywords: List<String>) {
     AI(
-        "AI services", "Models, API keys, the quick model, usage and cost",
-        listOf("provider", "API key", "model", "OpenAI", "Claude", "Anthropic", "Gemini", "Ollama", "Command Code", "DeepSeek", "Groq", "ElevenLabs", "quick model", "usage", "cost", "price", "tokens", "voice", "read aloud", "transcription", "thinking effort", "zero data retention"),
+        "AI services", "Models, API keys, the quick model, hiding details, usage and cost",
+        listOf("redact", "hide", "privacy", "mask", "personal details", "phone numbers", "provider", "API key", "model", "OpenAI", "Claude", "Anthropic", "Gemini", "Ollama", "Command Code", "DeepSeek", "Groq", "ElevenLabs", "quick model", "usage", "cost", "price", "tokens", "voice", "read aloud", "transcription", "thinking effort", "zero data retention"),
     ),
     SPEECH(
         "Speech & voices", "On-device transcription, speaker detection and voice memory",
@@ -118,7 +119,7 @@ enum class SettingsPage(val title: String, val summary: String, val keywords: Li
     ),
     RECORDING(
         "Recording & notes", "Microphone, audio clean-up, glossary and what happens after a meeting",
-        listOf("microphone", "Bluetooth", "headset", "noise", "audio clean-up", "glossary", "names", "terms", "summary", "language", "headphone button", "bookmark", "speaker names", "running notes", "calendar", "auto-record", "record automatically", "scheduled meetings", "Google Calendar"),
+        listOf("your name", "for you", "promised", "microphone", "Bluetooth", "headset", "noise", "audio clean-up", "glossary", "names", "terms", "summary", "language", "headphone button", "bookmark", "speaker names", "running notes", "calendar", "auto-record", "record automatically", "scheduled meetings", "Google Calendar"),
     ),
     FORMATS(
         "Summary formats", "Your own formats with the sections you want",
@@ -132,6 +133,7 @@ enum class SettingsPage(val title: String, val summary: String, val keywords: Li
     ),
     APPEARANCE("Appearance", "Light or dark, and wallpaper colours", listOf("theme", "dark mode", "light mode", "night", "colours", "colors", "Material You", "wallpaper")),
     DATA("Data & storage", "Space used, keeping recordings, backup and restore", listOf("storage", "space", "delete recordings", "keep recordings", "backup", "restore", "password", "automatic backup", "daily backup", "Google Drive", "Nextcloud")),
+    PROBLEMS("Problem report", "Send or save a log of what the app did, to find out what went wrong", listOf("bug", "crash", "log", "diagnostics", "help", "support", "not working", "error")),
     ;
 
     /** What on this page matches [query], or null if nothing does. */
@@ -153,6 +155,7 @@ private fun SettingsPage.icon(): ImageVector = when (this) {
     SettingsPage.EXPORT -> Icons.Filled.IosShare
     SettingsPage.APPEARANCE -> Icons.Filled.Palette
     SettingsPage.DATA -> Icons.Filled.Storage
+    SettingsPage.PROBLEMS -> Icons.Filled.BugReport
 }
 
 /** Settings: a short list of pages with a search box, or one page when [initialPage] is given. */
@@ -224,6 +227,7 @@ fun SettingsScreen(onBack: () -> Unit, initialPage: SettingsPage? = null) {
                 }
                 SettingsPage.AI -> {
                     item { ActiveServices(settings, keys, vm) }
+                    item { RedactionSection(settings, vm) }
                     item { UsageSection(settings, vm) }
                     item {
                         Column {
@@ -254,6 +258,7 @@ fun SettingsScreen(onBack: () -> Unit, initialPage: SettingsPage? = null) {
                 SettingsPage.RECORDING -> {
                     item { AutoRecordSection(settings, vm) }
                     item { ProcessingSettings(settings, vm) }
+                    item { YourNameSection(settings, vm) }
                     item { GlossarySection(settings, vm) }
                 }
                 SettingsPage.FORMATS -> item { FormatsSection(settings, vm) }
@@ -269,6 +274,7 @@ fun SettingsScreen(onBack: () -> Unit, initialPage: SettingsPage? = null) {
                     item { BackupSection(vm) }
                     item { AutoBackupSection(settings, vm) }
                 }
+                SettingsPage.PROBLEMS -> item { ProblemReportSection(vm) }
             }
         }
     }

@@ -1,7 +1,7 @@
 package com.kaliscriber.app.tasks
 
 import android.content.Context
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -93,7 +93,7 @@ class TaskSyncer(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            Log.w(TAG, "Couldn't update the task for \"${item.task}\"", e)
+                            AppLog.w(TAG, "Couldn't update the task for \"${item.task}\"", e)
                             continue
                         }
                     } else if (change is TaskSync.Change.Pull) {
@@ -113,7 +113,7 @@ class TaskSyncer(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Task sync failed", e)
+            AppLog.w(TAG, "Task sync failed", e)
             _status.value = Status.Failed(e.message ?: "Couldn't reach the calendar")
             0
         }

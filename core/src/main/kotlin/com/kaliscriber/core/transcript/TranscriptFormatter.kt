@@ -59,6 +59,13 @@ object TranscriptFormatter {
                 }
                 appendLine()
             }
+            insights.forMe?.takeUnless { it.isEmpty }?.let { me ->
+                appendLine("## For ${me.name}")
+                me.asked.forEach { appendLine("- Asked of you: $it") }
+                me.promised.forEach { appendLine("- You promised: $it") }
+                me.unanswered.forEach { appendLine("- Still to answer: $it") }
+                appendLine()
+            }
             insights.sections.forEach { section(it.title, it.items) }
             section("Key points", insights.keyPoints)
             section("Decisions", insights.decisions)

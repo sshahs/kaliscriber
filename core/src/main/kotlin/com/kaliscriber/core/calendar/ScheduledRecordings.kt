@@ -34,6 +34,8 @@ data class ScheduledRecording(
     val enabled: Boolean = true,
     /** For repeating schedules: the last day (ISO date, inclusive) it records on; null for no end. */
     val until: String? = null,
+    /** The project its meetings go in; null leaves that to the project title words. */
+    val projectId: String? = null,
 ) {
     /** [until] as a date, ignoring a malformed value. */
     val untilDate: LocalDate? get() = until?.let { runCatching { LocalDate.parse(it) }.getOrNull() }

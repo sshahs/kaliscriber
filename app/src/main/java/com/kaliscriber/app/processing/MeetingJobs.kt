@@ -2,7 +2,7 @@ package com.kaliscriber.app.processing
 
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import androidx.core.content.ContextCompat
 import com.kaliscriber.core.ai.AiException
 import kotlinx.coroutines.CoroutineScope
@@ -80,7 +80,7 @@ class MeetingJobs(private val context: Context, private val scope: CoroutineScop
             ContextCompat.startForegroundService(context, Intent(context, ProcessingService::class.java))
         } catch (e: Exception) {
             // Not allowed from the background on newer Android; the job still runs while the app is open.
-            Log.w("KaliScriber", "Could not start the processing service: ${e.message}")
+            AppLog.w("KaliScriber", "Could not start the processing service: ${e.message}")
         }
     }
 }

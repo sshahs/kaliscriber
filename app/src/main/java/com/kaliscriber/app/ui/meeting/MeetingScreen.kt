@@ -120,6 +120,7 @@ fun MeetingScreen(
     onOpenSettingsPage: (SettingsPage) -> Unit = { onOpenSettings() },
     /** Opens another meeting, e.g. the previous one in a series. */
     onOpenMeeting: (String) -> Unit = {},
+    onOpenProject: (String) -> Unit = {},
 ) {
     val vm = appViewModel(key = "meeting-$meetingId") { MeetingViewModel(it, meetingId) }
     val meeting by vm.meeting.collectAsStateWithLifecycle()
@@ -250,7 +251,7 @@ fun MeetingScreen(
                 }
             }
             when (tab) {
-                0 -> SummaryTab(m, busy, vm, onOpenTranscriptAt = { ms -> vm.player.seekTo(ms) }, onOpenMeeting = onOpenMeeting, onOpenFormats = { onOpenSettingsPage(SettingsPage.FORMATS) })
+                0 -> SummaryTab(m, busy, vm, onOpenTranscriptAt = { ms -> vm.player.seekTo(ms) }, onOpenMeeting = onOpenMeeting, onOpenFormats = { onOpenSettingsPage(SettingsPage.FORMATS) }, onOpenProject = onOpenProject)
                 1 -> TranscriptTab(m, vm, focusSegmentId = focusSegmentId, onAskAboutSelection = {
                     vm.askAboutSelection()
                     tab = 2

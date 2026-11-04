@@ -3,7 +3,7 @@ package com.kaliscriber.app.autorecord
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import com.kaliscriber.app.KaliScriberApp
 import kotlinx.coroutines.launch
 
@@ -50,7 +50,7 @@ private fun BroadcastReceiver.handle(context: Context, intent: Intent) {
                 else -> container.autoRecorder.tick(refresh = intent.getBooleanExtra(REFRESH, false))
             }
         } catch (e: Exception) {
-            Log.w("AutoRecord", "Auto-record check failed", e)
+            AppLog.w("AutoRecord", "Auto-record check failed", e)
         } finally {
             pending.finish()
         }

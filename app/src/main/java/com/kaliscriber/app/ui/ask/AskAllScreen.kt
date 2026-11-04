@@ -107,6 +107,10 @@ class AskAllViewModel(private val container: AppContainer) : ViewModel() {
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<String>() to emptyList())
 
+    val projects: StateFlow<List<com.kaliscriber.core.projects.Project>> = container.settingsStore.value
+        .map { it.projects }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), container.settings().projects)
+
     /** Stops the answer being written; what has arrived so far is kept. */
     fun stop() {
         job?.cancel()
@@ -144,6 +148,7 @@ fun AskAllScreen(
     val answering by vm.answering.collectAsStateWithLifecycle()
     val scope by vm.scope.collectAsStateWithLifecycle()
     val choices by vm.choices.collectAsStateWithLifecycle()
+    val projects by vm.projects.collectAsStateWithLifecycle()
     // Hidden as soon as the finished answer is in the conversation.
     val partial = answering?.takeIf { messages.lastOrNull()?.role == ChatRole.USER }
     var input by rememberSaveable { mutableStateOf("") }
@@ -181,7 +186,7 @@ fun AskAllScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
-            ScopeRow(scope, choices.first, choices.second, onChange = vm::setScope)
+            ScopeRow(scope, choices.first, choices.second, onChange = vm::setScope, projects = projects)
             if (messages.isEmpty() && !thinking) {
                 Column(
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),

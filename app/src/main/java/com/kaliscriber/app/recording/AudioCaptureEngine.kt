@@ -20,7 +20,7 @@ import android.media.audiofx.AudioEffect
 import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
 import android.os.Build
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import com.kaliscriber.core.ai.Microphone
 import com.kaliscriber.core.audio.Wav
 import com.kaliscriber.core.model.AudioChunk
@@ -180,7 +180,7 @@ class AudioCaptureEngine(
                 am.isBluetoothScoOn = true
                 true
             }
-        }.onFailure { Log.w(TAG, "Couldn't route the microphone to Bluetooth", it) }.getOrDefault(false)
+        }.onFailure { AppLog.w(TAG, "Couldn't route the microphone to Bluetooth", it) }.getOrDefault(false)
     }
 
     private fun releaseBluetooth() {
@@ -206,12 +206,12 @@ class AudioCaptureEngine(
         if (AutomaticGainControl.isAvailable()) {
             runCatching { AutomaticGainControl.create(session)?.also { it.setEnabled(true); effects += it } }
         }
-        Log.i(TAG, "Audio clean-up: ${effects.joinToString { it.javaClass.simpleName }.ifEmpty { "not available on this phone" }}")
+        AppLog.i(TAG, "Audio clean-up: ${effects.joinToString { it.javaClass.simpleName }.ifEmpty { "not available on this phone" }}")
     }
 
     private fun captureLoop(rec: AudioRecord) {
         val encoder = runCatching { AacFileEncoder(outputFile, SAMPLE_RATE, BIT_RATE) }
-            .onFailure { Log.w(TAG, "AAC encoder unavailable; only live chunks will be kept", it) }
+            .onFailure { AppLog.w(TAG, "AAC encoder unavailable; only live chunks will be kept", it) }
             .getOrNull()
         val readBuffer = ByteArray(BYTES_PER_SECOND / 10) // 100 ms
         val chunkTarget = (BYTES_PER_SECOND * chunkMillis / 1000).toInt()
@@ -244,7 +244,7 @@ class AudioCaptureEngine(
                 }
                 if (encoderOk) {
                     encoderOk = runCatching { encoder!!.encode(readBuffer, n) }
-                        .onFailure { Log.w(TAG, "AAC encoding failed", it) }
+                        .onFailure { AppLog.w(TAG, "AAC encoding failed", it) }
                         .isSuccess
                 }
                 chunk.write(readBuffer, 0, n)
@@ -270,7 +270,7 @@ class AudioCaptureEngine(
                 listener.onGap(it)
             }
         } catch (t: Throwable) {
-            Log.e(TAG, "Capture failed", t)
+            AppLog.e(TAG, "Capture failed", t)
             runCatching { if (chunk.size() >= BYTES_PER_SECOND) emitChunk() }
             listener.onError(t)
         } finally {

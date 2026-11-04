@@ -87,6 +87,7 @@ class ScheduleEditViewModel(private val container: AppContainer, id: String?) : 
     val initial: ScheduledRecording = container.settings().scheduledRecordings.firstOrNull { it.id == id } ?: newSchedule()
     val isNew: Boolean = container.settings().scheduledRecordings.none { it.id == id }
     val customFormats: List<CustomFormat> = container.settings().customFormats
+    val projects: List<com.kaliscriber.core.projects.Project> = container.settings().projects.filter { !it.archived || it.id == initial.projectId }
 
     fun save(schedule: ScheduledRecording, done: () -> Unit) = viewModelScope.launch {
         container.settingsStore.update { s ->
@@ -133,6 +134,7 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
     var days by remember { mutableStateOf(initial.days.toSet()) }
     var type by remember { mutableStateOf(initial.type) }
     var formatId by remember { mutableStateOf(initial.formatId) }
+    var projectId by remember { mutableStateOf(initial.projectId?.takeIf { id -> vm.projects.any { it.id == id } }) }
     var people by remember { mutableStateOf(initial.expectedSpeakers) }
     var remind by remember { mutableStateOf(initial.remindMinutes) }
     var agenda by remember { mutableStateOf(initial.agenda) }
@@ -156,7 +158,7 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
         title = title.trim(), start = startMs, end = endMs, repeat = repeat,
         days = if (repeat == Repeat.CUSTOM) days.sorted() else emptyList(),
         type = type, formatId = formatId, expectedSpeakers = people, remindMinutes = remind,
-        agenda = agenda.trim(), enabled = enabled,
+        agenda = agenda.trim(), enabled = enabled, projectId = projectId,
         until = if (repeat == Repeat.NONE) null else until?.toString(),
     )
     fun save() = vm.save(built()) {
@@ -254,6 +256,12 @@ fun ScheduleEditScreen(id: String?, onBack: () -> Unit) {
                 formatId = f
             }
             Hint("The sections the summary is written with. Auto guesses from the meeting's name.")
+
+            if (vm.projects.isNotEmpty()) {
+                Label("Project")
+                ProjectPicker(projectId, vm.projects) { projectId = it }
+                Hint("The recordings go in this project, with its decisions and open actions.")
+            }
 
             ExpectedSpeakersRow(people, onSelect = { people = it })
             Hint("Knowing how many people take part helps tell their voices apart.")
@@ -375,6 +383,25 @@ private fun Label(text: String) {
 @Composable
 private fun Hint(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** No project, or one of the user's projects. */
+@Composable
+private fun ProjectPicker(projectId: String?, projects: List<com.kaliscriber.core.projects.Project>, onPick: (String?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val current = projects.firstOrNull { it.id == projectId }?.name ?: "None (or by title words)"
+    Box {
+        OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(current, modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Choose the project")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("None (or by title words)") }, onClick = { open = false; onPick(null) })
+            projects.forEach { p ->
+                DropdownMenuItem(text = { Text(p.name) }, onClick = { open = false; onPick(p.id) })
+            }
+        }
+    }
 }
 
 /** Auto, a built-in format, or one of the user's own. */

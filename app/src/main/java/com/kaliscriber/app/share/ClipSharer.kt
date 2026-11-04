@@ -7,7 +7,7 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import androidx.core.content.FileProvider
 import com.kaliscriber.app.speech.AudioDecoder
 import com.kaliscriber.core.audio.Wav
@@ -38,7 +38,7 @@ object ClipSharer {
             m4a
         } catch (e: Exception) {
             // Not every phone has a usable AAC encoder; a WAV file plays anywhere.
-            Log.w(TAG, "AAC encoding failed, sharing WAV", e)
+            AppLog.w(TAG, "AAC encoding failed, sharing WAV", e)
             m4a.delete()
             val wav = File(dir, Clips.fileName(meeting, clip, "wav"))
             val pcm = toPcm16(samples)

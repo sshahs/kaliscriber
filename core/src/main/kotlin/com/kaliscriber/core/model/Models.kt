@@ -59,6 +59,12 @@ data class Meeting(
     /** When the recording was deleted to save space (the transcript and notes were kept). */
     val audioDeletedAt: Long? = null,
     /**
+     * The project the user put the meeting in; null lets a project's title words place it (see
+     * [com.kaliscriber.core.projects.Projects.of]), and [com.kaliscriber.core.projects.Projects.NONE]
+     * keeps it out of every project.
+     */
+    val projectId: String? = null,
+    /**
      * A summary of [segments] kept with the meeting, so lists, People pages and search can use it
      * while the transcript itself stays on disk (meeting lists leave [segments] empty).
      */
@@ -224,8 +230,21 @@ data class MeetingInsights(
     val format: String = "",
     /** Each agenda item and whether the meeting covered it, in the agenda's order. */
     val agenda: List<AgendaItem> = emptyList(),
+    /** The user's own part in the meeting, when their name is set. */
+    val forMe: ForMe? = null,
     val generatedAt: Long = 0,
 )
+
+/** What the meeting means for the user ([name]): what they were asked, promised, and left unanswered. */
+@Serializable
+data class ForMe(
+    val name: String,
+    val asked: List<String> = emptyList(),
+    val promised: List<String> = emptyList(),
+    val unanswered: List<String> = emptyList(),
+) {
+    val isEmpty: Boolean get() = asked.isEmpty() && promised.isEmpty() && unanswered.isEmpty()
+}
 
 @Serializable
 data class InsightSection(val title: String, val items: List<String>)

@@ -4,6 +4,8 @@ import com.kaliscriber.core.ai.CustomFormat
 import com.kaliscriber.core.ai.SummaryFormats
 import com.kaliscriber.core.model.Meeting
 import com.kaliscriber.core.model.MeetingStatus
+import com.kaliscriber.core.projects.Project
+import com.kaliscriber.core.projects.Projects
 import com.kaliscriber.core.transcript.TranscriptFormatter
 import kotlinx.serialization.Serializable
 import java.time.Instant
@@ -84,7 +86,13 @@ object MarkdownSync {
     }
 
     /** The note: properties Obsidian understands, then the meeting's notes (and transcript). */
-    fun note(meeting: Meeting, transcript: Boolean, custom: List<CustomFormat> = emptyList(), zone: ZoneId = ZoneId.systemDefault()): String = buildString {
+    fun note(
+        meeting: Meeting,
+        transcript: Boolean,
+        custom: List<CustomFormat> = emptyList(),
+        zone: ZoneId = ZoneId.systemDefault(),
+        projects: List<Project> = emptyList(),
+    ): String = buildString {
         val start = Instant.ofEpochMilli(meeting.createdAt).atZone(zone)
         val people = meeting.speakers.filterNot { it.isPlaceholder }.map { it.name.trim() }.filter { it.isNotEmpty() }.distinct()
         appendLine("---")
@@ -96,6 +104,7 @@ object MarkdownSync {
             people.forEach { appendLine("  - ${yaml(it)}") }
         }
         appendLine("format: ${yaml(SummaryFormats.of(meeting, custom).label)}")
+        Projects.of(meeting, projects)?.let { appendLine("project: ${yaml(it.name)}") }
         val open = meeting.insights?.actionItems.orEmpty().count { !it.done }
         if (open > 0) appendLine("open_actions: $open")
         appendLine("tags:")

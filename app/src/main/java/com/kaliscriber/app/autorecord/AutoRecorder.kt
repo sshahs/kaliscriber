@@ -10,7 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -100,6 +100,7 @@ class AutoRecorder(
         var decision = AutoRecord.decide(events, now, s.autoRecordWhich, st, recorderState(st))
         if (decision == AutoRecord.Decision.Stop) {
             val active = st.active!!
+            AppLog.i(TAG, "Stopping \"${active.title}\" at its end")
             recorder.stop()
             // Stopping happens in the background; the next meeting can only start once it has.
             withTimeoutOrNull(STOP_WAIT_MS) {
@@ -112,6 +113,7 @@ class AutoRecorder(
         }
         if (decision is AutoRecord.Decision.Start) {
             val event = decision.event
+            AppLog.i(TAG, "Starting \"${event.title}\" (${if (event.uid.startsWith(ScheduledRecordings.UID_PREFIX)) "scheduled" else "calendar"}), mic ${if (micAllowed()) "allowed" else "NOT allowed"}, overlay ${overlayAllowed()}, full screen ${fullScreenAllowed()}")
             st = st.copy(handled = st.handled + (AutoRecord.key(event) to event.end))
             store.update { st }
             st = begin(event) ?: st
@@ -171,7 +173,7 @@ class AutoRecorder(
         notify(event, event.title, "Starting now. Tap Record if it doesn't start by itself.", ask = true)
         if (Settings.canDrawOverlays(context)) {
             runCatching { context.startActivity(AutoRecordActivity.intent(context, key)) }
-                .onFailure { Log.w(TAG, "Couldn't open the recording screen", it) }
+                .onFailure { AppLog.w(TAG, "Couldn't open the recording screen", it) }
         }
         return null
     }
@@ -199,7 +201,7 @@ class AutoRecorder(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Couldn't start recording ${event.title}", e)
+            AppLog.w(TAG, "Couldn't start recording ${event.title}", e)
             notify(event, "Couldn't record ${event.title}", e.message ?: "Recording didn't start.", ask = false)
             return null
         } finally {
@@ -222,10 +224,11 @@ class AutoRecorder(
             schedule.expectedSpeakers?.let { pipeline.setExpectedSpeakers(meetingId, it) }
             // The notes then say which agenda items the meeting covered.
             if (schedule.agenda.isNotBlank()) pipeline.setAgenda(meetingId, schedule.agenda)
+            schedule.projectId?.takeIf { id -> settings().projects.any { it.id == id } }?.let { pipeline.setProject(meetingId, it) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Couldn't apply the schedule's settings", e)
+            AppLog.w(TAG, "Couldn't apply the schedule's settings", e)
         }
     }
 

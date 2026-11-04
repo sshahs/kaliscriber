@@ -141,6 +141,24 @@ class MeetingViewModel(private val container: AppContainer, val meetingId: Strin
         if (meeting.value?.insights != null && meeting.value?.segments?.isNotEmpty() == true) pipeline.generateInsights(meetingId)
     }
 
+    /** The projects a meeting can be put in. */
+    val projects: StateFlow<List<com.kaliscriber.core.projects.Project>> = container.settingsStore.value
+        .map { it.projects }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), container.settings().projects)
+
+    /** Puts the meeting in a project ([com.kaliscriber.core.projects.Projects.NONE] for none, null to go by title words). */
+    fun setProject(projectId: String?) = viewModelScope.launch { container.pipeline.setProject(meetingId, projectId) }
+
+    /** Makes a project and puts the meeting in it. */
+    fun createProject(name: String, words: String, about: String) = viewModelScope.launch {
+        val project = com.kaliscriber.core.projects.Project(
+            com.kaliscriber.core.util.Ids.new(), name.trim(), com.kaliscriber.core.projects.Projects.words(words), about.trim(),
+            createdAt = System.currentTimeMillis(),
+        )
+        container.settingsStore.update { it.copy(projects = it.projects + project) }
+        container.pipeline.setProject(meetingId, project.id)
+    }
+
     /** The user's own summary formats, offered next to the built-in ones. */
     val customFormats: StateFlow<List<CustomFormat>> = container.settingsStore.value
         .map { it.customFormats }

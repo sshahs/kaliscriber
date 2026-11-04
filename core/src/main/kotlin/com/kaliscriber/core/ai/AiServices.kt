@@ -27,7 +27,7 @@ class DefaultAiServices(
     private val usage: UsageLedger? = null,
 ) : AiServices {
 
-    override fun chat(): LlmClient = metered(chatFor(settings().chatProvider))
+    override fun chat(): LlmClient = metered(redacting(chatFor(settings().chatProvider)))
 
     /** The fast model; the main one when none is chosen or its provider has no API key yet. */
     override fun fastChat(): LlmClient {
@@ -38,10 +38,16 @@ class DefaultAiServices(
         } catch (e: AiException) {
             return chat()
         }
-        return metered(client)
+        return metered(redacting(client))
     }
 
     private fun metered(client: LlmClient): LlmClient = if (usage != null) MeteredLlm(client, usage) else client
+
+    /** Masks private details in what is sent, when the user turned that on. */
+    private fun redacting(client: LlmClient): LlmClient {
+        val r = settings().redaction
+        return if (r.active) RedactingLlm(client, r) else client
+    }
 
     override fun stt(): SttClient = sttFor(settings().sttProvider)
 

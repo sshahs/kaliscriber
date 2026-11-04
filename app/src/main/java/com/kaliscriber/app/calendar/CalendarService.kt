@@ -1,6 +1,6 @@
 package com.kaliscriber.app.calendar
 
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import com.kaliscriber.app.data.ExportSecret
 import com.kaliscriber.app.data.SecretStore
 import com.kaliscriber.core.ai.AppSettings
@@ -76,7 +76,7 @@ class CalendarService(
         } catch (ex: CancellationException) {
             throw ex
         } catch (ex: Exception) {
-            Log.w("KaliScriber", "Calendar: couldn't read events: ${ex.message}")
+            AppLog.w("KaliScriber", "Calendar: couldn't read events: ${ex.message}")
             lastReadOk = false
             // Keep what was read before; try again on the next request.
             if (key != cachedFor) cached = emptyList()

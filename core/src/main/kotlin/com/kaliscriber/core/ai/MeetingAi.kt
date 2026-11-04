@@ -12,6 +12,7 @@ import com.kaliscriber.core.model.ChatMessage
 import com.kaliscriber.core.model.ChatRole
 import com.kaliscriber.core.model.ExcerptRef
 import com.kaliscriber.core.model.FollowUpQuestion
+import com.kaliscriber.core.model.ForMe
 import com.kaliscriber.core.model.Gap
 import com.kaliscriber.core.model.GapAnalysis
 import com.kaliscriber.core.model.Highlight
@@ -162,7 +163,10 @@ class MeetingAi(
         requireTranscript(meeting)
         val format = SummaryFormats.of(meeting, settings().customFormats)
         val agenda = Agenda.items(meeting.agenda)
-        val task = Prompts.insightsTask(format) + if (agenda.isEmpty()) "" else "\n" + Prompts.agendaTask(agenda)
+        val names = Prompts.yourNames(settings().yourName)
+        val task = Prompts.insightsTask(format) +
+            (if (agenda.isEmpty()) "" else "\n" + Prompts.agendaTask(agenda)) +
+            (if (names.isEmpty()) "" else "\n" + Prompts.forMeTask(names))
         val obj = meetingJson(meeting, task, insightsSource(meeting, fromNotes))
         val previous = meeting.insights?.actionItems.orEmpty()
         val reused = HashSet<String>()
@@ -211,6 +215,15 @@ class MeetingAi(
                 val a = el as? JsonObject ?: return@mapNotNull null
                 val item = a.str("item", "title", "name") ?: return@mapNotNull null
                 AgendaItem(item, a.bool("covered", "done") ?: false, a.str("notes", "summary", "note").orEmpty())
+            },
+            forMe = if (names.isEmpty()) null else (obj["forMe"] ?: obj["for_me"]).let { el ->
+                val f = el as? JsonObject
+                ForMe(
+                    name = names.first(),
+                    asked = f?.strings("asked", "requests").orEmpty(),
+                    promised = f?.strings("promised", "commitments").orEmpty(),
+                    unanswered = f?.strings("unanswered", "openQuestions").orEmpty(),
+                )
             },
             generatedAt = clock.now(),
         )

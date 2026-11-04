@@ -13,7 +13,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import android.view.KeyEvent
 
 /**
@@ -76,7 +76,7 @@ class HeadsetButtons(private val context: Context, private val onPress: () -> Un
             track.play()
             Handler(Looper.getMainLooper()).postDelayed({ runCatching { track.release() } }, 1_500)
         } catch (e: Exception) {
-            Log.w("KaliScriber", "Couldn't claim the headphone buttons: ${e.message}")
+            AppLog.w("KaliScriber", "Couldn't claim the headphone buttons: ${e.message}")
         }
     }
 

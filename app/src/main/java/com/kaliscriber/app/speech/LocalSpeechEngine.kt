@@ -31,7 +31,7 @@ import com.kaliscriber.core.model.WordTiming
 import com.kaliscriber.core.speakers.BlockMerge
 import com.kaliscriber.core.transcript.Glossary
 import android.os.SystemClock
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -107,7 +107,7 @@ class LocalSpeechEngine(
                     transcribeInWindows(audio, ::recognize)
                 }
                 val audioMs = segments.lastOrNull()?.endMs ?: 0
-                Log.i(TAG, "${model.id}: transcribed ${audio.name} (${audioMs / 1000}s of speech) in ${SystemClock.elapsedRealtime() - started} ms")
+                AppLog.i(TAG, "${model.id}: transcribed ${audio.name} (${audioMs / 1000}s of speech) in ${SystemClock.elapsedRealtime() - started} ms")
                 SttResult(segments, diarized = false)
             }
         }
@@ -347,7 +347,7 @@ class LocalSpeechEngine(
                 val print = voiceprint(extractor, voice) ?: continue
                 voices[speaker.toString()] = DiarizedBlock.Voice(print, speakerTurns.sumOf { (it.end - it.start).toDouble() })
             }
-            Log.i(
+            AppLog.i(
                 TAG,
                 "Diarized ${samples.size / rate}s from ${offsetMs / 1000}s: ${voices.size} voices, ${turns.size} turns " +
                     "in ${SystemClock.elapsedRealtime() - started} ms",
@@ -372,7 +372,7 @@ class LocalSpeechEngine(
             val totalSamples = AudioDecoder.estimateSamples(audio)
             val blocks = totalSamples?.let { ((it + BLOCK_SECONDS * rate - 1) / (BLOCK_SECONDS * rate)).toInt().coerceAtLeast(1) } ?: 1
             val blockSamples = totalSamples?.let { ((it + blocks - 1) / blocks).toInt() + rate } ?: (BLOCK_SECONDS * rate)
-            Log.i(TAG, "Diarizing ${audio.name} in $blocks block(s) (speakers=${speakers ?: "auto"})")
+            AppLog.i(TAG, "Diarizing ${audio.name} in $blocks block(s) (speakers=${speakers ?: "auto"})")
             val started = SystemClock.elapsedRealtime()
             val results = mutableListOf<DiarizedBlock>()
             val diarizer = Diarizer()
@@ -406,7 +406,7 @@ class LocalSpeechEngine(
                 diarizer.release()
             }
             BlockMerge.merge(results, speakers).also {
-                Log.i(TAG, "Diarization found ${it.map { t -> t.speaker }.distinct().size} speakers in ${SystemClock.elapsedRealtime() - started} ms")
+                AppLog.i(TAG, "Diarization found ${it.map { t -> t.speaker }.distinct().size} speakers in ${SystemClock.elapsedRealtime() - started} ms")
             }
         }
     }

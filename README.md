@@ -25,7 +25,8 @@ KaliScriber is an Android meeting note taker. Press record (or let your calendar
 - 📝 **Notes that write themselves.** Summary, action items, decisions, highlights, risks and next steps, in a format that fits the meeting (1:1, stand-up, sales call, interview, lecture, or your own).
 - 📅 **Records by itself.** Schedule recordings in the app, or let it record meetings from your calendar, from start to finish.
 - 🔎 **Ask across everything.** "What did we decide about pricing last month?" gets an answer from all your meetings, with links to the exact moments.
-- ✅ **Tasks that stay in step.** Every action item in one list, synced both ways with your CalDAV calendar (Baikal and others).
+- ✅ **Tasks that stay in step.** Every action item in one list, synced both ways with your CalDAV calendar (Baikal and others), and a **For you** part in each meeting with what you were asked and promised.
+- 📁 **Projects.** Group meetings by project or client, with one page of its decisions, open actions and people, and questions answered from just its meetings.
 - 🔁 **Your data, your way.** Export to Notion, AFFiNE, Google Docs, email, a Markdown folder (Obsidian) or CalDAV, with encrypted automatic backups.
 
 ## 📲 Install
@@ -88,14 +89,16 @@ Every release is signed with the same key, so new versions install over old ones
 
 ### 🔎 Search and ask
 - **Ask AI** about a meeting, or about selected lines. Answers cite timestamps, appear as they're written, and can be stopped.
-- **Ask all meetings** with answers from everything you've recorded and links to the source moments. Narrow it by period, person or format. Optional **smart search** (a 30 MB on-device model) finds passages by meaning, not just words.
+- **Ask all meetings** with answers from everything you've recorded and links to the source moments. Narrow it by period, person, format or project. Optional **smart search** (a 30 MB on-device model) finds passages by meaning, not just words.
 - **Search** titles, people, summaries, action items and every transcript line, matching word forms ("price" finds "pricing").
 - **Find in transcript** with highlighted matches, or show one speaker's lines.
 - **Weekly recap:** the week's meetings, decisions, themes, risks and follow-ups, with open actions by person; optionally as a Friday notification.
 
-### ✅ Tasks and people
+### ✅ Tasks, people and projects
 - **Tasks:** every action item from every meeting, grouped by overdue, today, this week, later and no date. Tick, edit and filter by person, with an optional daily reminder.
+- **For you:** set your name and each meeting's notes list what you were asked, what you promised and questions still waiting on you.
 - **People pages** with each person's open tasks, notable quotes, meetings and talk time, plus one tap to ask about them.
+- **Projects:** put meetings in a project from their summary, through a schedule, or by title words. Each project's page has its open actions, decisions, recent risks, next steps, people and meetings, and *Ask about this project* answers from just its meetings.
 
 ### 🎧 Listen and talk
 - **Read aloud** a summary, an answer or a note.
@@ -116,7 +119,7 @@ Every release is signed with the same key, so new versions install over old ones
 | **Storage** | see what takes space and delete old recordings while keeping transcripts and notes |
 
 ### 🎨 Comfort
-Light, dark or follow the phone, with wallpaper colours if you like. Undo instead of "are you sure?", errors that link to the fix, a notification when notes are ready, Settings in short searchable pages, and screen-reader friendly controls.
+Light, dark or follow the phone, with wallpaper colours if you like. Undo instead of "are you sure?", errors that link to the fix, a notification when notes are ready, Settings in short searchable pages, screen-reader friendly controls, and a **problem report** (Settings → Problem report) that sends or saves a log of what the app did when something goes wrong.
 
 ## 🔒 Privacy
 
@@ -124,9 +127,10 @@ Light, dark or follow the phone, with wallpaper colours if you like. Undo instea
 |---|---|
 | Audio | stays on the phone with on-device transcription (the default); sent only to your speech provider if you choose a cloud one |
 | Transcripts, notes, voiceprints | stored only on the phone |
-| Text for summaries and answers | sent only to the AI provider you picked, with your key |
+| Text for summaries and answers | sent only to the AI provider you picked, with your key; optionally with email addresses, phone and card numbers and names you list **swapped for placeholders**, which are put back in what comes back |
 | API keys and passwords | encrypted with the Android Keystore, sent only to their own service, never put in backups |
 | Backups | encrypted with your password, written only where you choose; Android's own cloud backup is off |
+| Problem reports | a log of what the app did, kept on the phone; sent only if you send it, without keys, passwords, email addresses or meeting content |
 
 There is no KaliScriber server and no account.
 

@@ -17,6 +17,8 @@ import com.kaliscriber.app.ui.home.HomeScreen
 import com.kaliscriber.app.ui.meeting.MeetingScreen
 import com.kaliscriber.app.ui.notes.NoteScreen
 import com.kaliscriber.app.ui.people.PersonScreen
+import com.kaliscriber.app.ui.projects.ProjectScreen
+import com.kaliscriber.app.ui.projects.ProjectsScreen
 import com.kaliscriber.app.ui.recap.RecapScreen
 import com.kaliscriber.app.ui.schedule.ScheduleEditScreen
 import com.kaliscriber.app.ui.recording.RecordingScreen
@@ -34,6 +36,9 @@ object Routes {
     const val ASK_ALL = "ask-all?q={q}"
     const val PERSON = "person/{name}"
     const val RECAP = "recap"
+    const val PROJECTS = "projects"
+    const val PROJECT = "project/{id}"
+    fun project(id: String) = "project/${Uri.encode(id)}"
     const val SCHEDULE_EDIT = "schedule/edit?id={id}"
     fun scheduleEdit(id: String?) = "schedule/edit" + (id?.let { "?id=${Uri.encode(it)}" } ?: "")
     const val SETUP = "setup"
@@ -76,6 +81,7 @@ fun AppNavigation(openTasks: Boolean = false, openSchedule: Boolean = false) {
                 onAskAll = { nav.navigate(Routes.askAll(it)) },
                 onOpenPerson = { nav.navigate(Routes.person(it)) },
                 onOpenRecap = { nav.navigate(Routes.RECAP) },
+                onOpenProjects = { nav.navigate(Routes.PROJECTS) },
                 onEditSchedule = { nav.navigate(Routes.scheduleEdit(it)) },
                 onOpenSettingsPage = { nav.navigate(Routes.settings(it)) },
                 onOpenSetup = { nav.navigate(Routes.SETUP) { launchSingleTop = true } },
@@ -94,6 +100,18 @@ fun AppNavigation(openTasks: Boolean = false, openSchedule: Boolean = false) {
             arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null }),
         ) { entry ->
             ScheduleEditScreen(id = entry.arguments?.getString("id"), onBack = { nav.popBackStack() })
+        }
+        composable(Routes.PROJECTS) {
+            ProjectsScreen(onBack = { nav.popBackStack() }, onOpenProject = { nav.navigate(Routes.project(it)) })
+        }
+        composable(Routes.PROJECT, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+            ProjectScreen(
+                id = entry.arguments?.getString("id").orEmpty(),
+                onBack = { nav.popBackStack() },
+                onOpenMeeting = { nav.navigate(Routes.meeting(it)) },
+                onOpenPerson = { nav.navigate(Routes.person(it)) },
+                onAsk = { nav.navigate(Routes.askAll()) },
+            )
         }
         composable(Routes.RECAP) {
             RecapScreen(onBack = { nav.popBackStack() }, onOpenMeeting = { nav.navigate(Routes.meeting(it)) })
@@ -157,6 +175,7 @@ fun AppNavigation(openTasks: Boolean = false, openSchedule: Boolean = false) {
                 onOpenSettings = { nav.navigate(Routes.settings()) },
                 onOpenSettingsPage = { nav.navigate(Routes.settings(it)) },
                 onOpenMeeting = { nav.navigate(Routes.meeting(it)) },
+                onOpenProject = { nav.navigate(Routes.project(it)) },
             )
         }
         composable(Routes.NOTE, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->

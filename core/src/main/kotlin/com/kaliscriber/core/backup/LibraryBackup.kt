@@ -129,6 +129,10 @@ class LibraryBackup(
                     val backup = decode(data, AppSettings.serializer())
                     settings.update { backup }
                     settingsRestored = true
+                } else {
+                    // Restored meetings keep their projects even when the settings stay as they are.
+                    val backup = decode(data, AppSettings.serializer())
+                    settings.update { local -> local.copy(projects = local.projects + backup.projects.filter { b -> local.projects.none { it.id == b.id } }) }
                 }
                 path == VOICES -> {
                     val backup = decode(data, ListSerializer(VoiceProfile.serializer()))

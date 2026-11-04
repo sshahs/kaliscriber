@@ -7,7 +7,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.PowerManager
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
@@ -90,7 +90,7 @@ class ProcessingService : LifecycleService() {
                 startForeground(NOTIFICATION_ID, notification, type)
                 return true
             } catch (e: Exception) {
-                Log.w("KaliScriber", "Could not run meeting processing in the foreground (type $type): ${e.message}")
+                AppLog.w("KaliScriber", "Could not run meeting processing in the foreground (type $type): ${e.message}")
             }
         }
         return false

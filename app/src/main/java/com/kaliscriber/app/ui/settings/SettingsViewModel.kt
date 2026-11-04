@@ -301,6 +301,26 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         container.scope.launch { container.autoRecorder.unskip(AutoRecord.key(event)) }
     }
 
+    // --- Problem reports -----------------------------------------------------------------------------
+
+    fun problemReportName(): String = container.problemReports.fileName()
+
+    suspend fun problemReportIntent(): android.content.Intent = container.problemReports.shareIntent()
+
+    /** Saves a report into [uri]; returns what to tell the user. */
+    suspend fun saveProblemReport(uri: Uri): String = try {
+        container.problemReports.saveTo(uri)
+        "Report saved."
+    } catch (e: Exception) {
+        "Couldn't save the report: ${e.message}"
+    }
+
+    suspend fun problemLogBytes(): Long = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { container.problemReports.logBytes() }
+
+    fun clearProblemLog() {
+        container.scope.launch(kotlinx.coroutines.Dispatchers.IO) { container.problemReports.clear() }
+    }
+
     // --- Task sync -----------------------------------------------------------------------------------
 
     val taskSyncStatus = container.taskSync.status

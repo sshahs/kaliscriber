@@ -108,6 +108,21 @@ object Prompts {
         items.forEach { appendLine("- $it") }
     }.trimEnd()
 
+    /** The user's names from the "Your name" setting: the first is what they're called in the notes. */
+    fun yourNames(setting: String): List<String> = setting.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+    /** Asks for the user's own part in the meeting, added to the insights task. */
+    fun forMeTask(names: List<String>): String = buildString {
+        val name = names.first()
+        val others = names.drop(1)
+        append("The user who recorded the meeting is $name")
+        if (others.isNotEmpty()) append(" (also called ${others.joinToString(" or ")})")
+        appendLine(". They may appear under that name or as an unidentified speaker; use what is said to them or about them by name.")
+        appendLine("Also add \"forMe\" to the JSON object, written to the user in the second person:")
+        appendLine("{\"asked\": [\"what others asked or requested of the user, saying who asked\"], \"promised\": [\"what the user said they would do, with any deadline\"], \"unanswered\": [\"questions put to the user that they didn't answer or said they would come back on\"]}")
+        append("Use only what was said, one short sentence per item with a [mm:ss] timestamp, and leave a list empty rather than guess.")
+    }
+
     /** [INSIGHTS_TASK] for a kind of meeting: its focus, and the extra sections it needs. */
     fun insightsTask(type: MeetingType): String = insightsTask(SummaryFormats.of(type))
 

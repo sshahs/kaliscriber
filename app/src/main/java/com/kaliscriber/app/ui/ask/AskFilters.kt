@@ -26,10 +26,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.kaliscriber.core.ask.AskScope
+import com.kaliscriber.core.projects.Project
 
 /** Chips that narrow which meetings a question is about: when, with whom, and what kind. */
 @Composable
-internal fun ScopeRow(scope: AskScope, people: List<String>, formats: List<String>, onChange: (AskScope) -> Unit) {
+internal fun ScopeRow(
+    scope: AskScope,
+    people: List<String>,
+    formats: List<String>,
+    onChange: (AskScope) -> Unit,
+    projects: List<Project> = emptyList(),
+) {
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -51,6 +58,17 @@ internal fun ScopeRow(scope: AskScope, people: List<String>, formats: List<Strin
                 options = listOf<Pair<String, String?>>("Anyone" to null) + people.map { it to it },
                 current = scope.person,
                 onPick = { onChange(scope.copy(person = it)) },
+            )
+        }
+        if (projects.isNotEmpty() || scope.project != null) {
+            val options = (projects.filter { !it.archived } + listOfNotNull(scope.project)).distinctBy { it.id }
+            ScopeChip(
+                label = scope.project?.name ?: "Any project",
+                selected = scope.project != null,
+                what = "Project",
+                options = listOf<Pair<String, String?>>("Any project" to null) + options.map { it.name to it.id },
+                current = scope.project?.id,
+                onPick = { id -> onChange(scope.copy(project = options.firstOrNull { it.id == id })) },
             )
         }
         if (formats.size > 1) {

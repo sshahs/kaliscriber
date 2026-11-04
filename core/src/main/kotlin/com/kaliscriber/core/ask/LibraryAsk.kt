@@ -76,7 +76,7 @@ class LibraryAsk(
         val recorded = meetings.all().filter { it.hasTranscript || it.insights != null }
         if (recorded.isEmpty()) throw AiException("There are no transcribed meetings to search yet.")
         val now = clock.now()
-        val all = recorded.filter { scope.matches(it, now, settings().customFormats) }
+        val all = recorded.filter { scope.matches(it, now, settings().customFormats, settings().projects) }
         if (all.isEmpty()) throw AiException("No meetings match the filters (${scope.describe()}). Change or clear them and ask again.")
         // Follow-ups ("and who owns it?") lean on the previous question for what to look up.
         val lastQuestion = previous.lastOrNull { it.role == ChatRole.USER && !it.isError }?.content

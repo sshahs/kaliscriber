@@ -5,7 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.Constraints
@@ -87,7 +87,7 @@ object RecapReminder {
             throw e
         } catch (e: Exception) {
             // Still say how the week went; the recap can be written from the app.
-            Log.w("KaliScriber", "Weekly recap couldn't be written", e)
+            AppLog.w("KaliScriber", "Weekly recap couldn't be written", e)
             null
         }
         prefs.edit().putString("shown", week.toString()).apply()

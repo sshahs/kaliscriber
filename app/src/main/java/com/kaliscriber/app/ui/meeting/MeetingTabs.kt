@@ -221,9 +221,11 @@ fun SummaryTab(
     onOpenTranscriptAt: (Long) -> Unit,
     onOpenMeeting: (String) -> Unit = {},
     onOpenFormats: () -> Unit = {},
+    onOpenProject: (String) -> Unit = {},
 ) {
     val insights = meeting.insights
     val customFormats by vm.customFormats.collectAsStateWithLifecycle()
+    val projects by vm.projects.collectAsStateWithLifecycle()
     var editingAgenda by rememberSaveable { mutableStateOf(false) }
     if (editingAgenda) {
         AgendaDialog(
@@ -258,6 +260,11 @@ fun SummaryTab(
     val parts = buildList {
         if (insights.summary.isNotBlank()) {
             add(SummaryPart("summary", null) { SectionCard("Summary", Icons.Filled.Subject) { MarkdownText(insights.summary) } })
+        }
+        insights.forMe?.takeUnless { it.isEmpty }?.let { me ->
+            add(SummaryPart("forme", "For you ${me.asked.size + me.promised.size + me.unanswered.size}") {
+                ForMeCard(me, onOpenTranscriptAt = { at -> onOpenTranscriptAt(at) })
+            })
         }
         since?.let { last ->
             add(SummaryPart("since", "Since last time") { SinceLastCard(last, onOpenMeeting) })
@@ -384,7 +391,14 @@ fun SummaryTab(
     val lead = 2
     LazyColumn(state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "format") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                ProjectChip(
+                    meeting, projects,
+                    onPick = { vm.setProject(it) },
+                    onCreate = { name, words, about -> vm.createProject(name, words, about) },
+                    onOpen = onOpenProject,
+                )
+                Spacer(Modifier.width(8.dp))
                 FormatRow(
                     meeting, customFormats,
                     enabled = Busy.INSIGHTS !in busy,

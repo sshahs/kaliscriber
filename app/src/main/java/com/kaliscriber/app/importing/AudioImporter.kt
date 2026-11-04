@@ -4,7 +4,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import com.kaliscriber.app.processing.MeetingJobs
 import com.kaliscriber.core.ai.AiException
 import com.kaliscriber.core.model.MeetingStatus
@@ -77,7 +77,7 @@ class AudioImporter(
             try {
                 jobs.run(meeting.id) { pipeline.processImportedAudio(meeting.id, audio, durationMs) }
             } catch (e: Exception) {
-                Log.w("KaliScriber", "Import of ${meeting.id} failed: ${e.message}")
+                AppLog.w("KaliScriber", "Import of ${meeting.id} failed: ${e.message}")
             }
         }
         return meeting.id
@@ -117,7 +117,7 @@ class AudioImporter(
             try {
                 jobs.run(created.id) { pipeline.importTranscript(created.id, parsed) }
             } catch (e: Exception) {
-                Log.w("KaliScriber", "Import of transcript ${created.id} failed: ${e.message}")
+                AppLog.w("KaliScriber", "Import of transcript ${created.id} failed: ${e.message}")
             }
         }
         return created.id

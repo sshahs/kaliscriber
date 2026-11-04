@@ -3,7 +3,7 @@ package com.kaliscriber.app.backup
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import com.kaliscriber.app.processing.MeetingJobs
 import com.kaliscriber.app.recording.RecordingManager
 import com.kaliscriber.app.recording.RecordingState
@@ -147,7 +147,7 @@ class BackupManager(
         for (old in AutoBackups.toDelete(children.keys.toList(), keep)) {
             val id = children[old] ?: continue
             runCatching { DocumentsContract.deleteDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(tree, id)) }
-                .onFailure { Log.w("KaliScriber", "Couldn't delete the old backup $old", it) }
+                .onFailure { AppLog.w("KaliScriber", "Couldn't delete the old backup $old", it) }
         }
         return name
     }
@@ -185,7 +185,7 @@ class BackupManager(
             } catch (e: OutOfMemoryError) {
                 State.Failed("The phone ran out of memory.")
             } catch (e: Exception) {
-                Log.w("KaliScriber", "$what failed", e)
+                AppLog.w("KaliScriber", "$what failed", e)
                 State.Failed("$what failed: ${e.message ?: e.javaClass.simpleName}")
             } finally {
                 password.fill('\u0000')

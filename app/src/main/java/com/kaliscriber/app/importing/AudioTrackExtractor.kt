@@ -6,7 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
-import android.util.Log
+import com.kaliscriber.app.diagnostics.AppLog
 import java.io.File
 import java.nio.ByteBuffer
 
@@ -59,7 +59,7 @@ object AudioTrackExtractor {
             }
             return file.takeIf { it.length() > 0 }
         } catch (e: Exception) {
-            Log.w("KaliScriber", "Couldn't take the audio out of the video, importing it whole: ${e.message}")
+            AppLog.w("KaliScriber", "Couldn't take the audio out of the video, importing it whole: ${e.message}")
             out?.delete()
             return null
         } finally {
